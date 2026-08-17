@@ -15,6 +15,7 @@
 
 #include "torch_helper.h"
 #include "sgl_kenel_npu_ops.h"
+#include "sparse_flash_attention.h"
 #include "causal_conv1d_update/op_host/causal_conv1d_update.h"
 #ifdef SGL_KERNEL_ENABLE_A3_ONLY_OPS
 #include "causal_conv1d/op_host/causal_conv1d.h"
@@ -161,6 +162,31 @@ TORCH_LIBRARY_FRAGMENT(npu, m)
     m.def("softfp8_w8a16_grouped_matmul(Tensor mat1, Tensor mat2, Tensor scale, Tensor groupList, str c) -> Tensor");
 #endif
 #endif
+}
+}  // namespace
+
+namespace {
+TORCH_LIBRARY(sgl_kernel_npu, m)
+{
+    m.def(
+        "npu_sparse_flash_attention(Tensor query, Tensor key, Tensor value, "
+        "Tensor sparse_indices, float scale_value, *, Tensor? block_table=None, "
+        "Tensor? actual_seq_lengths_query=None, Tensor? actual_seq_lengths_kv=None, "
+        "Tensor? query_rope=None, Tensor? key_rope=None, int sparse_block_size=1, "
+        "str layout_query='BSND', str layout_kv='BSND', int sparse_mode=3, "
+        "int pre_tokens=9223372036854775807, int next_tokens=9223372036854775807, "
+        "int attention_mode=2, bool return_softmax_lse=False) "
+        "-> (Tensor attention_out, Tensor softmax_max, Tensor softmax_sum)");
+}
+
+TORCH_LIBRARY_IMPL(sgl_kernel_npu, PrivateUse1, m)
+{
+    m.impl("npu_sparse_flash_attention", TORCH_FN(sglang::npu_kernel::sparse_flash_attention));
+}
+
+TORCH_LIBRARY_IMPL(sgl_kernel_npu, Meta, m)
+{
+    m.impl("npu_sparse_flash_attention", TORCH_FN(sglang::npu_kernel::sparse_flash_attention_meta));
 }
 }  // namespace
 
