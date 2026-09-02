@@ -1,4 +1,5 @@
 import os
+import time
 from enum import IntEnum
 from typing import Callable, List, Optional, Tuple, Union
 
@@ -64,6 +65,7 @@ class Buffer:
         self.num_nvl_bytes = num_nvl_bytes
         self.num_rdma_bytes = num_rdma_bytes
         self.low_latency_mode = low_latency_mode
+        self._diag_seq = 0
         try:
             backend = group._get_backend(torch.device("npu"))
             moe_all_to_all_group_name = backend.get_hccl_comm_name(self.rank)
@@ -95,6 +97,19 @@ class Buffer:
 
         # Initialize low latency mode strategy
         self._init_low_latency_strategy(low_latency_strategy)
+
+    def _diag(self, op: str, phase: str, **fields) -> None:
+        if os.getenv("DEEPEP_OP_DIAG", "0") != "1":
+            return
+        self._diag_seq += 1
+        rank = self.rank
+        values = " ".join(f"{key}={value}" for key, value in fields.items())
+        print(
+            f"DeepEP op diag rank={rank} seq={self._diag_seq} op={op} "
+            f"phase={phase} t_ns={time.monotonic_ns()} "
+            f"buffer_low_latency_mode={self.low_latency_mode} {values}",
+            flush=True,
+        )
 
     def _init_normal_strategy(self, strategy: Union[str, NormalStrategy]):
         """Initialize normal mode communication strategy"""
@@ -362,8 +377,19 @@ class Buffer:
         # Default config
         config = self.get_dispatch_config(self.group_size) if config is None else config
 
+        x_shape = getattr(x[0] if isinstance(x, tuple) else x, "shape", None)
+        topk_shape = getattr(topk_idx, "shape", None)
+        self._diag(
+            "normal_dispatch",
+            "before",
+            x_shape=tuple(x_shape) if x_shape is not None else None,
+            topk_shape=tuple(topk_shape) if topk_shape is not None else None,
+            async_finish=async_finish,
+            allocate_on_comm_stream=allocate_on_comm_stream,
+            previous_event=previous_event is not None,
+        )
         # Delegate to normal strategy
-        return self.normal_strategy.dispatch(
+        result = self.normal_strategy.dispatch(
             x=x,
             handle=handle,
             num_tokens_per_rank=num_tokens_per_rank,
@@ -381,6 +407,8 @@ class Buffer:
             dispatch_wait_recv_cost_stats=dispatch_wait_recv_cost_stats,
             quant_mode=quant_mode,
         )
+        self._diag("normal_dispatch", "after")
+        return result
 
     @log_parameters(["topk_idx"])
     def notify_verify(
@@ -508,8 +536,17 @@ class Buffer:
         # Default config
         config = self.get_combine_config(self.group_size) if config is None else config
 
+        x_shape = getattr(x, "shape", None)
+        self._diag(
+            "normal_combine",
+            "before",
+            x_shape=tuple(x_shape) if x_shape is not None else None,
+            async_finish=async_finish,
+            allocate_on_comm_stream=allocate_on_comm_stream,
+            previous_event=previous_event is not None,
+        )
         # Delegate to normal strategy
-        return self.normal_strategy.combine(
+        result = self.normal_strategy.combine(
             x=x,
             handle=handle,
             topk_weights=topk_weights,
@@ -520,6 +557,8 @@ class Buffer:
             allocate_on_comm_stream=allocate_on_comm_stream,
             combine_send_cost_stats=combine_send_cost_stats,
         )
+        self._diag("normal_combine", "after")
+        return result
 
     def internode_dispatch(
         self,
@@ -673,7 +712,17 @@ class Buffer:
             elif use_fp8:
                 quant_mode = "int8"
 
-        return self.low_latency_strategy.low_latency_dispatch(
+        self._diag(
+            "low_latency_dispatch",
+            "before",
+            x_shape=tuple(x.shape),
+            topk_shape=tuple(topk_idx.shape),
+            num_max_dispatch_tokens_per_rank=num_max_dispatch_tokens_per_rank,
+            num_experts=num_experts,
+            async_finish=async_finish,
+            return_recv_hook=return_recv_hook,
+        )
+        result = self.low_latency_strategy.low_latency_dispatch(
             x=x,
             topk_idx=topk_idx,
             num_max_dispatch_tokens_per_rank=num_max_dispatch_tokens_per_rank,
@@ -688,6 +737,8 @@ class Buffer:
             topk_weights=topk_weights,
             quant_mode=quant_mode,
         )
+        self._diag("low_latency_dispatch", "after")
+        return result
 
     @log_parameters(["topk_idx"])
     def low_latency_combine(
@@ -727,7 +778,15 @@ class Buffer:
             hook: the receiving hook function (valid only if `return_recv_hook` is set).
         """
         # Delegate to low latency strategy
-        return self.low_latency_strategy.low_latency_combine(
+        self._diag(
+            "low_latency_combine",
+            "before",
+            x_shape=tuple(x.shape),
+            topk_shape=tuple(topk_idx.shape),
+            async_finish=async_finish,
+            return_recv_hook=return_recv_hook,
+        )
+        result = self.low_latency_strategy.low_latency_combine(
             x=x,
             topk_idx=topk_idx,
             topk_weights=topk_weights,
@@ -737,6 +796,8 @@ class Buffer:
             return_recv_hook=return_recv_hook,
             out=out,
         )
+        self._diag("low_latency_combine", "after")
+        return result
 
     def begin_profile(
         self,
