@@ -1,4 +1,6 @@
 import os
+import json
+from pathlib import Path
 import time
 from enum import IntEnum
 from typing import Callable, List, Optional, Tuple, Union
@@ -66,6 +68,13 @@ class Buffer:
         self.num_rdma_bytes = num_rdma_bytes
         self.low_latency_mode = low_latency_mode
         self._diag_seq = 0
+        self._capture_enabled = os.getenv("DEEPEP_OP_CAPTURE", "0") == "1"
+        self._capture_dir = Path(
+            os.getenv("DEEPEP_OP_CAPTURE_DIR", "/tmp/deepep_capture")
+        )
+        self._capture_max = int(os.getenv("DEEPEP_OP_CAPTURE_MAX_CALLS", "256"))
+        self._capture_count = 0
+        self._capture_file = None
         try:
             backend = group._get_backend(torch.device("npu"))
             moe_all_to_all_group_name = backend.get_hccl_comm_name(self.rank)
@@ -118,6 +127,55 @@ class Buffer:
         self._diag(op, "before_sync")
         torch.npu.synchronize()
         self._diag(op, "after_sync")
+
+    def _capture_begin(self, op: str, tensors=(), **fields):
+        """Persist replay metadata and small routing tensors for one call."""
+        if not self._capture_enabled:
+            return None
+        self._capture_dir.mkdir(parents=True, exist_ok=True)
+        if self._capture_file is None:
+            self._capture_file = open(
+                self._capture_dir / f"rank_{self.rank}.jsonl", "a", buffering=1
+            )
+        call_id = self._capture_count
+        self._capture_count += 1
+        slot = call_id % max(self._capture_max, 1)
+        for stale in self._capture_dir.glob(f"rank_{self.rank}_slot_{slot}_*.pt"):
+            stale.unlink(missing_ok=True)
+        tensor_files = {}
+        for name, tensor in tensors:
+            if tensor is None:
+                continue
+            path = self._capture_dir / f"rank_{self.rank}_slot_{slot}_{name}.pt"
+            torch.save(tensor.detach().cpu(), path)
+            tensor_files[name] = path.name
+        record = {
+            "rank": self.rank,
+            "call_id": call_id,
+            "slot": slot,
+            "op": op,
+            "phase": "before",
+            "t_ns": time.monotonic_ns(),
+            "buffer_low_latency_mode": self.low_latency_mode,
+            "tensor_files": tensor_files,
+            **fields,
+        }
+        self._capture_file.write(json.dumps(record, sort_keys=True) + "\n")
+        return call_id
+
+    def _capture_end(self, call_id, op: str, **fields) -> None:
+        if call_id is None or self._capture_file is None:
+            return
+        record = {
+            "rank": self.rank,
+            "call_id": call_id,
+            "op": op,
+            "phase": "after_launch",
+            "t_ns": time.monotonic_ns(),
+            "buffer_low_latency_mode": self.low_latency_mode,
+            **fields,
+        }
+        self._capture_file.write(json.dumps(record, sort_keys=True) + "\n")
 
     def _init_normal_strategy(self, strategy: Union[str, NormalStrategy]):
         """Initialize normal mode communication strategy"""
@@ -396,6 +454,16 @@ class Buffer:
             allocate_on_comm_stream=allocate_on_comm_stream,
             previous_event=previous_event is not None,
         )
+        capture_id = self._capture_begin(
+            "normal_dispatch",
+            tensors=(("topk_idx", topk_idx), ("topk_weights", topk_weights)),
+            x_shape=tuple(x_shape) if x_shape is not None else None,
+            topk_shape=tuple(topk_shape) if topk_shape is not None else None,
+            async_finish=async_finish,
+            allocate_on_comm_stream=allocate_on_comm_stream,
+            previous_event=previous_event is not None,
+            quant_mode=quant_mode,
+        )
         # Delegate to normal strategy
         result = self.normal_strategy.dispatch(
             x=x,
@@ -417,6 +485,7 @@ class Buffer:
         )
         self._diag("normal_dispatch", "after_launch")
         self._diag_sync("normal_dispatch")
+        self._capture_end(capture_id, "normal_dispatch")
         return result
 
     @log_parameters(["topk_idx"])
@@ -554,6 +623,13 @@ class Buffer:
             allocate_on_comm_stream=allocate_on_comm_stream,
             previous_event=previous_event is not None,
         )
+        capture_id = self._capture_begin(
+            "normal_combine",
+            x_shape=tuple(x_shape) if x_shape is not None else None,
+            async_finish=async_finish,
+            allocate_on_comm_stream=allocate_on_comm_stream,
+            previous_event=previous_event is not None,
+        )
         # Delegate to normal strategy
         result = self.normal_strategy.combine(
             x=x,
@@ -568,6 +644,7 @@ class Buffer:
         )
         self._diag("normal_combine", "after_launch")
         self._diag_sync("normal_combine")
+        self._capture_end(capture_id, "normal_combine")
         return result
 
     def internode_dispatch(
@@ -732,6 +809,20 @@ class Buffer:
             async_finish=async_finish,
             return_recv_hook=return_recv_hook,
         )
+        capture_id = self._capture_begin(
+            "low_latency_dispatch",
+            tensors=(("topk_idx", topk_idx), ("topk_weights", topk_weights)),
+            x_shape=tuple(x.shape),
+            topk_shape=tuple(topk_idx.shape),
+            num_max_dispatch_tokens_per_rank=num_max_dispatch_tokens_per_rank,
+            num_experts=num_experts,
+            async_finish=async_finish,
+            return_recv_hook=return_recv_hook,
+            quant_mode=quant_mode,
+            use_fp8=use_fp8,
+            use_ue8m0=use_ue8m0,
+            use_mxfp4=use_mxfp4,
+        )
         result = self.low_latency_strategy.low_latency_dispatch(
             x=x,
             topk_idx=topk_idx,
@@ -749,6 +840,7 @@ class Buffer:
         )
         self._diag("low_latency_dispatch", "after_launch")
         self._diag_sync("low_latency_dispatch")
+        self._capture_end(capture_id, "low_latency_dispatch")
         return result
 
     @log_parameters(["topk_idx"])
@@ -797,6 +889,14 @@ class Buffer:
             async_finish=async_finish,
             return_recv_hook=return_recv_hook,
         )
+        capture_id = self._capture_begin(
+            "low_latency_combine",
+            tensors=(("topk_idx", topk_idx), ("topk_weights", topk_weights)),
+            x_shape=tuple(x.shape),
+            topk_shape=tuple(topk_idx.shape),
+            async_finish=async_finish,
+            return_recv_hook=return_recv_hook,
+        )
         result = self.low_latency_strategy.low_latency_combine(
             x=x,
             topk_idx=topk_idx,
@@ -809,6 +909,7 @@ class Buffer:
         )
         self._diag("low_latency_combine", "after_launch")
         self._diag_sync("low_latency_combine")
+        self._capture_end(capture_id, "low_latency_combine")
         return result
 
     def begin_profile(
