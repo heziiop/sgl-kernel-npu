@@ -111,6 +111,14 @@ class Buffer:
             flush=True,
         )
 
+    def _diag_sync(self, op: str) -> None:
+        """Optionally wait until the just-launched NPU work completes."""
+        if os.getenv("DEEPEP_OP_DIAG_SYNC", "0") != "1":
+            return
+        self._diag(op, "before_sync")
+        torch.npu.synchronize()
+        self._diag(op, "after_sync")
+
     def _init_normal_strategy(self, strategy: Union[str, NormalStrategy]):
         """Initialize normal mode communication strategy"""
         if isinstance(strategy, NormalStrategy):
@@ -407,7 +415,8 @@ class Buffer:
             dispatch_wait_recv_cost_stats=dispatch_wait_recv_cost_stats,
             quant_mode=quant_mode,
         )
-        self._diag("normal_dispatch", "after")
+        self._diag("normal_dispatch", "after_launch")
+        self._diag_sync("normal_dispatch")
         return result
 
     @log_parameters(["topk_idx"])
@@ -557,7 +566,8 @@ class Buffer:
             allocate_on_comm_stream=allocate_on_comm_stream,
             combine_send_cost_stats=combine_send_cost_stats,
         )
-        self._diag("normal_combine", "after")
+        self._diag("normal_combine", "after_launch")
+        self._diag_sync("normal_combine")
         return result
 
     def internode_dispatch(
@@ -737,7 +747,8 @@ class Buffer:
             topk_weights=topk_weights,
             quant_mode=quant_mode,
         )
-        self._diag("low_latency_dispatch", "after")
+        self._diag("low_latency_dispatch", "after_launch")
+        self._diag_sync("low_latency_dispatch")
         return result
 
     @log_parameters(["topk_idx"])
@@ -796,7 +807,8 @@ class Buffer:
             return_recv_hook=return_recv_hook,
             out=out,
         )
-        self._diag("low_latency_combine", "after")
+        self._diag("low_latency_combine", "after_launch")
+        self._diag_sync("low_latency_combine")
         return result
 
     def begin_profile(
