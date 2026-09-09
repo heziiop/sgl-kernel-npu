@@ -266,10 +266,9 @@ ascendc_compile_options(sparse_flash_attention_kernel PRIVATE
     -DASCENDC_DUMP=0
     --cce-auto-sync=off
     -Wno-deprecated-declarations
-    -mllvm
-    -cce-vf-remove-membar=false
-    -mllvm
-    -cce-aicore-hoist-movemask=false
+    # Keep each -mllvm pair grouped; CMake otherwise deduplicates repeated -mllvm flags.
+    "SHELL:-mllvm -cce-vf-remove-membar=false"
+    "SHELL:-mllvm -cce-aicore-hoist-movemask=false"
 )
 set(SFA_KERNEL_TARGETS sparse_flash_attention_kernel)
 
