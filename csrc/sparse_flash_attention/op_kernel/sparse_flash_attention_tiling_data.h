@@ -30,6 +30,7 @@ struct alignas(8) SparseFlashAttentionBaseParamsMla {
     uint32_t sparseBlockCount;
     uint32_t isActualLenDimsNull;
     uint32_t isActualLenDimsKVNull;
+    uint32_t dispatchKey;
 };
 
 struct alignas(8) SparseFlashAttentionSingleCoreParamsMla {

@@ -129,33 +129,54 @@ __aicore__ inline void RunSparseFlashAttention(GM_ADDR query, GM_ADDR key, GM_AD
 #endif
 }
 
-#define DEFINE_SFA_KERNEL(kernel_name, flash_decode, page_attention, layout_t, kv_layout_t, template_mode, split_g,    \
-                          is_bf16)                                                                                     \
-    extern "C" __global__ __aicore__ void kernel_name(                                                                 \
-        GM_ADDR query, GM_ADDR key, GM_ADDR value, GM_ADDR sparseIndices, GM_ADDR blocktable,                          \
-        GM_ADDR actualSeqLengthsQuery, GM_ADDR actualSeqLengthsKV, GM_ADDR queryRope, GM_ADDR keyRope,                 \
-        GM_ADDR attentionOut, GM_ADDR softmaxMax, GM_ADDR softmaxSum, GM_ADDR workspace, GM_ADDR tiling)               \
-    {                                                                                                                  \
-        KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);                                                             \
-        RunSparseFlashAttention<flash_decode, page_attention, layout_t, kv_layout_t, template_mode, split_g, is_bf16>( \
-            query, key, value, sparseIndices, blocktable, actualSeqLengthsQuery, actualSeqLengthsKV, queryRope,        \
-            keyRope, attentionOut, softmaxMax, softmaxSum, workspace, tiling);                                         \
+extern "C" __global__ __aicore__ void sgl_sparse_flash_attention(
+    GM_ADDR query, GM_ADDR key, GM_ADDR value, GM_ADDR sparseIndices, GM_ADDR blocktable, GM_ADDR actualSeqLengthsQuery,
+    GM_ADDR actualSeqLengthsKV, GM_ADDR queryRope, GM_ADDR keyRope, GM_ADDR attentionOut, GM_ADDR softmaxMax,
+    GM_ADDR softmaxSum, GM_ADDR workspace, GM_ADDR tiling)
+{
+    KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
+    auto tilingData = reinterpret_cast<const __gm__ SparseFlashAttentionTilingDataMla *>(tiling);
+    const uint32_t dispatch_key = tilingData->baseParams.dispatchKey & 0xffffU;
+    const bool isBf16 = (tilingData->baseParams.dispatchKey & (1U << 16)) != 0;
+
+#define SFA_RUN(page, layout, kvLayout, mode, split, dtype)                                                          \
+    RunSparseFlashAttention<0, page, layout, kvLayout, mode, split, dtype>(                                          \
+        query, key, value, sparseIndices, blocktable, actualSeqLengthsQuery, actualSeqLengthsKV, queryRope, keyRope, \
+        attentionOut, softmaxMax, softmaxSum, workspace, tiling)
+#define SFA_CASE(base, page, layout, kvLayout)                \
+    case (base):                                              \
+    case (base) + (1U << 10):                                 \
+    case (base) + (1U << 14):                                 \
+    case (base) + (1U << 10) + (1U << 14):                    \
+        if (isBf16) {                                         \
+            if (dispatch_key == (base))                       \
+                SFA_RUN(page, layout, kvLayout, 0, 0, true);  \
+            else if (dispatch_key == (base) + (1U << 10))     \
+                SFA_RUN(page, layout, kvLayout, 1, 0, true);  \
+            else if (dispatch_key == (base) + (1U << 14))     \
+                SFA_RUN(page, layout, kvLayout, 0, 1, true);  \
+            else                                              \
+                SFA_RUN(page, layout, kvLayout, 1, 1, true);  \
+        } else {                                              \
+            if (dispatch_key == (base))                       \
+                SFA_RUN(page, layout, kvLayout, 0, 0, false); \
+            else if (dispatch_key == (base) + (1U << 10))     \
+                SFA_RUN(page, layout, kvLayout, 1, 0, false); \
+            else if (dispatch_key == (base) + (1U << 14))     \
+                SFA_RUN(page, layout, kvLayout, 0, 1, false); \
+            else                                              \
+                SFA_RUN(page, layout, kvLayout, 1, 1, false); \
+        }                                                     \
+        break
+
+    switch (dispatch_key) {
+        SFA_CASE(0U, 0, SFA_LAYOUT_BSND, SFA_LAYOUT_BSND);
+        SFA_CASE(130U, 1, SFA_LAYOUT_BSND, SFA_LAYOUT_PA_BSND);
+        SFA_CASE(68U, 0, SFA_LAYOUT_TND, SFA_LAYOUT_TND);
+        SFA_CASE(134U, 1, SFA_LAYOUT_TND, SFA_LAYOUT_PA_BSND);
+        default:
+            break;
     }
-
-#define DEFINE_SFA_VARIANTS(prefix, page_attention, layout_t, kv_layout_t)                          \
-    DEFINE_SFA_KERNEL(prefix##_c, 0, page_attention, layout_t, kv_layout_t, 0, 0, false)            \
-    DEFINE_SFA_KERNEL(prefix##_c_splitg, 0, page_attention, layout_t, kv_layout_t, 0, 1, false)     \
-    DEFINE_SFA_KERNEL(prefix##_v, 0, page_attention, layout_t, kv_layout_t, 1, 0, false)            \
-    DEFINE_SFA_KERNEL(prefix##_v_splitg, 0, page_attention, layout_t, kv_layout_t, 1, 1, false)     \
-    DEFINE_SFA_KERNEL(prefix##_bf16_c, 0, page_attention, layout_t, kv_layout_t, 0, 0, true)        \
-    DEFINE_SFA_KERNEL(prefix##_bf16_c_splitg, 0, page_attention, layout_t, kv_layout_t, 0, 1, true) \
-    DEFINE_SFA_KERNEL(prefix##_bf16_v, 0, page_attention, layout_t, kv_layout_t, 1, 0, true)        \
-    DEFINE_SFA_KERNEL(prefix##_bf16_v_splitg, 0, page_attention, layout_t, kv_layout_t, 1, 1, true)
-
-DEFINE_SFA_VARIANTS(sgl_sfa_bsnd, 0, SFA_LAYOUT_BSND, SFA_LAYOUT_BSND)
-DEFINE_SFA_VARIANTS(sgl_sfa_pa_bsnd, 1, SFA_LAYOUT_BSND, SFA_LAYOUT_PA_BSND)
-DEFINE_SFA_VARIANTS(sgl_sfa_tnd, 0, SFA_LAYOUT_TND, SFA_LAYOUT_TND)
-DEFINE_SFA_VARIANTS(sgl_sfa_pa_tnd, 1, SFA_LAYOUT_TND, SFA_LAYOUT_PA_BSND)
-
-#undef DEFINE_SFA_VARIANTS
-#undef DEFINE_SFA_KERNEL
+#undef SFA_CASE
+#undef SFA_RUN
+}

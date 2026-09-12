@@ -20,38 +20,7 @@
 #include <string>
 #include <tuple>
 
-#include "aclrtlaunch_sgl_sfa_bsnd_c.h"
-#include "aclrtlaunch_sgl_sfa_bsnd_c_splitg.h"
-#include "aclrtlaunch_sgl_sfa_bsnd_v.h"
-#include "aclrtlaunch_sgl_sfa_bsnd_v_splitg.h"
-#include "aclrtlaunch_sgl_sfa_bsnd_bf16_c.h"
-#include "aclrtlaunch_sgl_sfa_bsnd_bf16_c_splitg.h"
-#include "aclrtlaunch_sgl_sfa_bsnd_bf16_v.h"
-#include "aclrtlaunch_sgl_sfa_bsnd_bf16_v_splitg.h"
-#include "aclrtlaunch_sgl_sfa_pa_bsnd_c.h"
-#include "aclrtlaunch_sgl_sfa_pa_bsnd_c_splitg.h"
-#include "aclrtlaunch_sgl_sfa_pa_bsnd_v.h"
-#include "aclrtlaunch_sgl_sfa_pa_bsnd_v_splitg.h"
-#include "aclrtlaunch_sgl_sfa_pa_bsnd_bf16_c.h"
-#include "aclrtlaunch_sgl_sfa_pa_bsnd_bf16_c_splitg.h"
-#include "aclrtlaunch_sgl_sfa_pa_bsnd_bf16_v.h"
-#include "aclrtlaunch_sgl_sfa_pa_bsnd_bf16_v_splitg.h"
-#include "aclrtlaunch_sgl_sfa_pa_tnd_c.h"
-#include "aclrtlaunch_sgl_sfa_pa_tnd_c_splitg.h"
-#include "aclrtlaunch_sgl_sfa_pa_tnd_v.h"
-#include "aclrtlaunch_sgl_sfa_pa_tnd_v_splitg.h"
-#include "aclrtlaunch_sgl_sfa_pa_tnd_bf16_c.h"
-#include "aclrtlaunch_sgl_sfa_pa_tnd_bf16_c_splitg.h"
-#include "aclrtlaunch_sgl_sfa_pa_tnd_bf16_v.h"
-#include "aclrtlaunch_sgl_sfa_pa_tnd_bf16_v_splitg.h"
-#include "aclrtlaunch_sgl_sfa_tnd_c.h"
-#include "aclrtlaunch_sgl_sfa_tnd_c_splitg.h"
-#include "aclrtlaunch_sgl_sfa_tnd_v.h"
-#include "aclrtlaunch_sgl_sfa_tnd_v_splitg.h"
-#include "aclrtlaunch_sgl_sfa_tnd_bf16_c.h"
-#include "aclrtlaunch_sgl_sfa_tnd_bf16_c_splitg.h"
-#include "aclrtlaunch_sgl_sfa_tnd_bf16_v.h"
-#include "aclrtlaunch_sgl_sfa_tnd_bf16_v_splitg.h"
+#include "aclrtlaunch_sgl_sparse_flash_attention.h"
 #include "ge_helper.h"
 #include "sparse_flash_attention_def.h"
 #include "tiling/sparse_flash_attention_tiling.h"
@@ -92,78 +61,17 @@ c10::optional<at::Tensor> ContiguousOptional(const c10::optional<at::Tensor> &te
     return tensor->contiguous();
 }
 
-void DispatchSparseFlashAttention(uint64_t tiling_key, uint32_t block_dim, const at::Tensor &query,
-                                  const at::Tensor &key, const at::Tensor &value, const at::Tensor &sparse_indices,
+void DispatchSparseFlashAttention(uint32_t block_dim, const at::Tensor &query, const at::Tensor &key,
+                                  const at::Tensor &value, const at::Tensor &sparse_indices,
                                   const at::Tensor &block_table, const at::Tensor &actual_seq_lengths_query,
                                   const at::Tensor &actual_seq_lengths_kv, const at::Tensor &query_rope,
                                   const at::Tensor &key_rope, const at::Tensor &attention_out,
                                   const at::Tensor &softmax_max, const at::Tensor &softmax_sum,
-                                  const at::Tensor &workspace, const at::Tensor &tiling, bool is_bf16)
+                                  const at::Tensor &workspace, const at::Tensor &tiling)
 {
-    constexpr uint64_t kTilingKeyMask = 0x1;
-    constexpr uint64_t kLayoutMask = 0xf;
-    constexpr uint64_t kFlashDecodeShift = 0;
-    constexpr uint64_t kPageAttentionShift = 1;
-    constexpr uint64_t kLayoutShift = 2;
-    constexpr uint64_t kKvLayoutShift = 6;
-    constexpr uint64_t kTemplateModeShift = 10;
-    constexpr uint64_t kSplitGShift = 14;
-    constexpr uint64_t kBsndLayout = 0;
-    constexpr uint64_t kTndLayout = 1;
-    constexpr uint64_t kPagedBsndLayout = 2;
-
-    const uint64_t flash_decode = (tiling_key >> kFlashDecodeShift) & kTilingKeyMask;
-    const uint64_t page_attention = (tiling_key >> kPageAttentionShift) & kTilingKeyMask;
-    const uint64_t layout = (tiling_key >> kLayoutShift) & kLayoutMask;
-    const uint64_t kv_layout = (tiling_key >> kKvLayoutShift) & kLayoutMask;
-    const uint64_t template_mode = (tiling_key >> kTemplateModeShift) & kLayoutMask;
-    const uint64_t split_g = (tiling_key >> kSplitGShift) & kTilingKeyMask;
-
-    TORCH_CHECK(flash_decode == 0, "sparse_flash_attention: unsupported flash-decode tiling key");
-    TORCH_CHECK(template_mode <= 1 && split_g <= 1, "sparse_flash_attention: unsupported template tiling key");
-
-#define LAUNCH_SFA_KERNEL(kernel_name)                                                                                \
-    EXEC_KERNEL_CMD(kernel_name, block_dim, query, key, value, sparse_indices, block_table, actual_seq_lengths_query, \
-                    actual_seq_lengths_kv, query_rope, key_rope, attention_out, softmax_max, softmax_sum, workspace,  \
-                    tiling)
-
-#define LAUNCH_SFA_TEMPLATE_SUFFIX(prefix, suffix)        \
-    do {                                                  \
-        if (template_mode == 0 && split_g == 0) {         \
-            LAUNCH_SFA_KERNEL(prefix##suffix##_c);        \
-        } else if (template_mode == 0) {                  \
-            LAUNCH_SFA_KERNEL(prefix##suffix##_c_splitg); \
-        } else if (split_g == 0) {                        \
-            LAUNCH_SFA_KERNEL(prefix##suffix##_v);        \
-        } else {                                          \
-            LAUNCH_SFA_KERNEL(prefix##suffix##_v_splitg); \
-        }                                                 \
-    } while (false)
-
-#define LAUNCH_SFA_TEMPLATE(prefix)                    \
-    do {                                               \
-        if (is_bf16) {                                 \
-            LAUNCH_SFA_TEMPLATE_SUFFIX(prefix, _bf16); \
-        } else {                                       \
-            LAUNCH_SFA_TEMPLATE_SUFFIX(prefix, );      \
-        }                                              \
-    } while (false)
-
-    if (page_attention == 0 && layout == kBsndLayout && kv_layout == kBsndLayout) {
-        LAUNCH_SFA_TEMPLATE(sgl_sfa_bsnd);
-    } else if (page_attention == 1 && layout == kBsndLayout && kv_layout == kPagedBsndLayout) {
-        LAUNCH_SFA_TEMPLATE(sgl_sfa_pa_bsnd);
-    } else if (page_attention == 0 && layout == kTndLayout && kv_layout == kTndLayout) {
-        LAUNCH_SFA_TEMPLATE(sgl_sfa_tnd);
-    } else if (page_attention == 1 && layout == kTndLayout && kv_layout == kPagedBsndLayout) {
-        LAUNCH_SFA_TEMPLATE(sgl_sfa_pa_tnd);
-    } else {
-        TORCH_CHECK(false, "sparse_flash_attention: unsupported layout tiling key");
-    }
-
-#undef LAUNCH_SFA_TEMPLATE
-#undef LAUNCH_SFA_TEMPLATE_SUFFIX
-#undef LAUNCH_SFA_KERNEL
+    EXEC_KERNEL_CMD(sgl_sparse_flash_attention, block_dim, query, key, value, sparse_indices, block_table,
+                    actual_seq_lengths_query, actual_seq_lengths_kv, query_rope, key_rope, attention_out, softmax_max,
+                    softmax_sum, workspace, tiling);
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor> make_outputs(const at::Tensor &query, const at::Tensor &key,
@@ -369,10 +277,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> sparse_flash_attention(
     auto queryRopeLaunch = query_rope_input.value_or(queryPlaceholder);
     auto keyRopeLaunch = key_rope_input.value_or(queryPlaceholder);
 
-    DispatchSparseFlashAttention(tiling.GetTilingKey(), tiling.GetBlockDim(), query_input, key_input, value_input,
-                                 sparse_indices_input, blockTableLaunch, actualSeqLengthsQueryLaunch,
-                                 actualSeqLengthsKvLaunch, queryRopeLaunch, keyRopeLaunch, attention_out, softmax_max,
-                                 softmax_sum, workspace, tilingTensor, query_input.scalar_type() == at::kBFloat16);
+    DispatchSparseFlashAttention(tiling.GetBlockDim(), query_input, key_input, value_input, sparse_indices_input,
+                                 blockTableLaunch, actualSeqLengthsQueryLaunch, actualSeqLengthsKvLaunch,
+                                 queryRopeLaunch, keyRopeLaunch, attention_out, softmax_max, softmax_sum, workspace,
+                                 tilingTensor);
     return {attention_out, softmax_max, softmax_sum};
 }
 

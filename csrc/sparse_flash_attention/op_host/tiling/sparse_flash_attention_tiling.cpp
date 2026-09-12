@@ -457,6 +457,8 @@ ge::graphStatus SFAMlaTiling::DoOpTiling(SFATilingInfo *sfaInfo)
     CalcBlockDim();
     GetWorkspaceSize();
     GenTilingKey();
+    const uint32_t dtypeBit = (sfaInfo_->inputQType == ge::DT_BF16) ? (1U << 16) : 0U;
+    tilingData_.baseParams.set_dispatchKey(static_cast<uint32_t>(tilingKey_) | dtypeBit);
 
     if (SetWorkspaceSize(workspaceSize_) != ge::GRAPH_SUCCESS) {
         return ge::GRAPH_FAILED;
