@@ -9,8 +9,7 @@
 | `tilelang` | Not implemented | Not implemented |
 | `ascendc` | Not implemented | Not implemented |
 
-`ascendc` is not implemented: the native `torch.ops.npu.minimax_indexer` fast path of the legacy module is
-not migrated, so the new entry point only provides `triton` and `torch_native`.
+`ascendc` is not implemented: the operator only provides `triton` and `torch_native`.
 
 ## Signature
 
@@ -62,18 +61,17 @@ def flash_decode_bnsd_with_topk_idx(
 ## Description
 
 Decode attention over a BNSD KV cache: it scores KV blocks and returns block-level topk indices, or the
-attention output together with the indices on the full attention path. Three mutually exclusive branches
-(numbering follows the migration plan; the native ① fast path is not part of the new framework):
+attention output together with the indices on the full attention path. Three mutually exclusive branches:
 
-- **② Empty topk**: `disable_index_value=True` and `topk<=0` returns `(None, [QH, B, 0])`.
-- **③ Score only**: `disable_index_value=True` and `topk>0` scores every KV block per query row and head and
+- **① Empty topk**: `disable_index_value=True` and `topk<=0` returns `(None, [QH, B, 0])`.
+- **② Score only**: `disable_index_value=True` and `topk>0` scores every KV block per query row and head and
   returns `(None, topk_idx)`; production decode/verify uses this path.
-- **④ Full attention**: `disable_index_value=False` produces the attention output and the block scores in one
+- **③ Full attention**: `disable_index_value=False` produces the attention output and the block scores in one
   KV pass and returns `(o, topk_idx)`.
 
-Supported scope: branches ② and ③ (score-only) are fully supported, including `score_type`
+Supported scope: branches ① and ② (score-only) are fully supported, including `score_type`
 `"max"`/`"lse"`, `init_blocks`/`local_blocks` forcing, the direct page source and `block_table`,
-`packed_seq_lens`, `sanitize_page_ids` and `fused_append_local`. Branch ④ remains in the Triton
+`packed_seq_lens`, `sanitize_page_ids` and `fused_append_local`. Branch ③ remains in the Triton
 implementation only; it is out of the supported and validated scope and `torch_native` rejects it.
 
 Block score reductions (`max` and `lse`; $D$ is head_dim, $\sigma$ is `sm_scale` and defaults to $D^{-1/2}$):
@@ -124,9 +122,9 @@ constraints.
 | `disable_index_value` | `bool` | — | — | `False` | `True` selects the score-only path, `False` the full attention path; torch_native supports `True` only. |
 | `num_kv_chunks` | `int` or `None` | — | — | `None` | KV chunks of the full attention path; chosen from the vector-core count when `None`; Triton only. |
 | `max_num_kv_chunks` | `int` | — | — | `8` | Power-of-two cap of the automatic chunk choice; Triton only. |
-| `use_triton_topk` | `bool` or `None` | — | — | `None` | Legacy compatibility parameter, no effect. |
-| `num_topk_chunks` | `int` or `None` | — | — | `None` | Legacy compatibility parameter, no effect. |
-| `use_chunked_score` | `bool` | — | — | `True` | Legacy compatibility parameter, no effect. |
+| `use_triton_topk` | `bool` or `None` | — | — | `None` | Compatibility parameter, no effect. |
+| `num_topk_chunks` | `int` or `None` | — | — | `None` | Compatibility parameter, no effect. |
+| `use_chunked_score` | `bool` | — | — | `True` | Compatibility parameter, no effect. |
 | `score_blocks_per_chunk` | `int` | — | — | `16` | Target block tiles per score program; Triton only. |
 | `score_max_chunks` | `int` | — | — | `32` | Upper bound of the score chunk count; Triton only. |
 | `req_to_token` | `torch.Tensor` or `None` | `[num_requests, max_context]` | `int32`, `int64` | `None` | Direct page source holding the token slot per position; requires `req_pool_indices`. |
@@ -138,21 +136,21 @@ constraints.
 | `runtime_fill_only` | `bool` | — | — | `False` | Pick the direct-fill candidate path from the runtime block count; Triton only. |
 | `runtime_score_short_max_blocks` | `int` | — | — | `0` | Block-count threshold of the short-context adaptive chunking; when enabled (non-zero) it must be `>0` and given together with the next parameter, and the default 0 disables it; Triton only. |
 | `runtime_score_short_chunks` | `int` | — | — | `0` | Chunk count used below the threshold; when enabled (non-zero) it must be a power of two and is truncated to the total chunk count when larger, and the default 0 disables it; Triton only. |
-| `fused_append_local` | `bool` | — | — | `False` | Fuse candidate merge with the causal local block append; the last slot is emitted only for ③ with `topk>0`. |
-| `use_native` | `bool` | — | — | `True` | Legacy compatibility parameter, no effect (the new framework has no native backend). |
+| `fused_append_local` | `bool` | — | — | `False` | Fuse candidate merge with the causal local block append; the last slot is emitted only for ② with `topk>0`. |
+| `use_native` | `bool` | — | — | `True` | Compatibility parameter, no effect (there is no native backend). |
 | `impl` | `str` | — | — | `"auto"` | Keyword-only; one of `"auto"`, `"triton"`, `"torch_native"`. |
 
 | Return | Type | Shape | Dtype | Description and constraints |
 | --- | --- | --- | --- | --- |
 | `o` | `torch.Tensor` or `None` | `[B, QH, D]` | same as `q` | `None` on the score-only path; a new tensor on the full attention path (Triton only). |
-| `topk_idx` | `torch.Tensor` | `[QH, B, topk]`, or `[QH, B, topk+1]` for ③ with `topk>0` and `fused_append_local` | `int32` | `-1` marks an invalid, out-of-range or de-duplicated slot; once valid candidates are exhausted block 0 is repeated. The order of equally scored blocks is undefined. |
+| `topk_idx` | `torch.Tensor` | `[QH, B, topk]`, or `[QH, B, topk+1]` for ② with `topk>0` and `fused_append_local` | `int32` | `-1` marks an invalid, out-of-range or de-duplicated slot; once valid candidates are exhausted block 0 is repeated. The order of equally scored blocks is undefined. |
 
 Additional notes: the empty-topk branch returns `[QH, B, 0]`; the direct page source only supports the
 score-only path; `sink` only affects the full attention denominator.
 
 ## triton backend
 
-- Uses CANN Triton kernels and covers branches ②③④; branch ④ is kept for compatibility only and is out of
+- Uses CANN Triton kernels and covers branches ①②③; branch ③ is kept for compatibility only and is out of
   the supported and validated scope. The number of score chunks follows `max_seqlen` and the runtime block
   count.
 - The `init_blocks`/`local_blocks` rewrite only affects topk candidate scores.
@@ -168,7 +166,7 @@ score-only path; `sink` only affects the full attention denominator.
   `topk<=0` returns the empty index tensor.
 - The full attention branch (`disable_index_value=False`) has no reference implementation and is rejected
   with `AssertionError`.
-- Ignores 12 scheduling/legacy parameters: `max_seqlen`, `num_kv_chunks`, `max_num_kv_chunks`,
+- Ignores 12 scheduling/compatibility parameters: `max_seqlen`, `num_kv_chunks`, `max_num_kv_chunks`,
   `score_blocks_per_chunk`, `score_max_chunks`, `runtime_fill_only`, `runtime_score_short_max_blocks`,
   `runtime_score_short_chunks`, `use_native`, `use_triton_topk`, `num_topk_chunks`, `use_chunked_score`.
 - Processes the whole KV range in one pass; memory and latency grow linearly with the context length, so it is

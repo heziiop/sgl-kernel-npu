@@ -1,13 +1,7 @@
 """Triton implementation of the decode BNSD score/topk operator.
 
-Self-contained copy of the Triton kernels used by
-``flash_decode_bnsd_with_topk_idx``. The legacy
-``sgl_kernel_npu.indexer.flash_block_score_decode`` module is neither modified
-nor imported here.
-
-Only branches (2)/(3)/(4) are migrated: the native AscendC fast path
-(``torch.ops.npu.minimax_indexer``) is not part of the new framework and is
-intentionally absent.
+Standalone implementation of ``flash_decode_bnsd_with_topk_idx``. It covers
+the empty-topk, score-only and full-attention branches.
 """
 
 from __future__ import annotations
@@ -1424,10 +1418,9 @@ def flash_decode_bnsd_with_topk_idx(
 ) -> tuple[Optional[torch.Tensor], torch.Tensor]:
     """Decode attention over a BNSD block cache with block-level topk indices.
 
-    This is the Triton route of the migrated operator; the historical
-    parameters ``use_native``, ``use_triton_topk``, ``num_topk_chunks`` and
-    ``use_chunked_score`` are absorbed by the public ``operators`` wrapper and
-    therefore do not appear here.
+    Parameters that only schedule the public wrapper (``use_native``,
+    ``use_triton_topk``, ``num_topk_chunks`` and ``use_chunked_score``) are
+    absorbed there and do not appear here.
 
     Branches (mutually exclusive):
 

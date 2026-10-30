@@ -133,7 +133,7 @@ def _torch_native_impl(
     # The reference covers the score-only branch only: it supports max/lse,
     # forced blocks, both page sources, packed/sanitize and fused append, and
     # rejects the attention branch. It absorbs sink/v_cache, chunking,
-    # graph-replay hints and legacy flags.
+    # graph-replay hints and compatibility flags.
     return _torch_native_fn(
         q=q,
         k_cache_bnsd=k_cache_bnsd,
@@ -202,10 +202,7 @@ def flash_decode_bnsd_with_topk_idx(
     only, including ``score_type`` ``"max"``/``"lse"``, ``init_blocks``/
     ``local_blocks`` forcing, the direct page source and ``block_table``,
     ``packed_seq_lens``, ``sanitize_page_ids`` and ``fused_append_local``; the
-    attention branch (``disable_index_value=False``) is rejected. The native
-    AscendC fast path of the legacy module
-    (``torch.ops.npu.minimax_indexer``) is not part of this framework, so the
-    operator has no ``ascendc`` implementation.
+    attention branch (``disable_index_value=False``) is rejected.
 
     Branches (mutually exclusive):
 

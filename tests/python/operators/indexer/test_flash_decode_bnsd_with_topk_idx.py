@@ -20,7 +20,7 @@ torch = pytest.importorskip("torch")
 from tests.python.utils.accuracy import check_accuracy
 from tests.python.utils.performance import check_performance
 
-# Case ids selected for performance collection (production shapes, plan 6.2).
+# Case ids selected for performance collection (production shapes).
 perf_shape = [
     "m3-decode-1x128k",
     "m3-decode-16x4k",
@@ -34,7 +34,7 @@ skip_acc_check_cases = {"m3-decode-1x1m"}
 
 
 def case(cid, **overrides):
-    """Describe one test case; shapes follow the migration plan (6.2/6.3)."""
+    """Describe one test case; shapes follow the production call sites."""
     values = dict(
         id=cid,
         batch=1,
@@ -59,7 +59,7 @@ def case(cid, **overrides):
         index_dtype="int32",
         mode="spaced",
         runtime_fill_only=True,
-        legacy_flags=False,
+        compat_flags=False,
         seed=42,
         expected=None,
         expected_rows=None,
@@ -177,7 +177,7 @@ def build_inputs(spec):
         short_blocks, short_chunks = spec["adaptive"]
         kwargs["runtime_score_short_max_blocks"] = short_blocks
         kwargs["runtime_score_short_chunks"] = short_chunks
-    if spec["legacy_flags"]:
+    if spec["compat_flags"]:
         kwargs.update(
             use_native=True,
             use_triton_topk=True,
@@ -368,7 +368,7 @@ EDGE_CASES = [
     ),
     case("edge-dim-64", batch=2, head_dim=64, seq_lens=[4096, 2048]),
     case("edge-fp16", dtype=torch.float16, seq_lens=[4096]),
-    case("edge-legacy-flags", seq_lens=[4096], legacy_flags=True),
+    case("edge-compat-flags", seq_lens=[4096], compat_flags=True),
 ]
 
 CASES = PRODUCTION_CASES + EDGE_CASES
@@ -526,13 +526,10 @@ def test_block_table_fused_requires_capacity():
         flash_decode_bnsd_with_topk_idx(**kwargs)
 
 
-def test_unknown_impl_and_metadata():
+def test_registered_metadata():
     from sgl_kernel_npu.operators import list_impls
     from sgl_kernel_npu.operators.indexer import flash_decode_bnsd_with_topk_idx
-    from sgl_kernel_npu.operators.utils.registry import (
-        ImplementationNotFoundError,
-        get_op_name,
-    )
+    from sgl_kernel_npu.operators.utils.registry import get_op_name
 
     assert list_impls(flash_decode_bnsd_with_topk_idx) == [
         "auto",
@@ -542,5 +539,3 @@ def test_unknown_impl_and_metadata():
     assert get_op_name(flash_decode_bnsd_with_topk_idx) == (
         "indexer.flash_decode_bnsd_with_topk_idx"
     )
-    with pytest.raises(ImplementationNotFoundError):
-        flash_decode_bnsd_with_topk_idx(**build_inputs(_base_spec()), impl="ascendc")

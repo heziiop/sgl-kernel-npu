@@ -58,6 +58,3 @@ csrc/deepep/ops/cmake/
 csrc/deepep/ops/scripts/
 csrc/deepep/ops2/cmake/
 csrc/deepep/ops2/scripts/
-
-# Local P0 baselines for the migrated operators (not committed).
-results/golden/

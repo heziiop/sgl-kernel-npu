@@ -9,8 +9,7 @@
 | `tilelang` | 未实现 | 未实现 |
 | `ascendc` | 未实现 | 未实现 |
 
-`ascendc` 未实现：旧实现中的原生快路 `torch.ops.npu.minimax_indexer` 不迁入新框架，新入口只提供
-`triton` 与 `torch_native` 两种实现。
+`ascendc` 未实现：本算子只提供 `triton` 与 `torch_native` 两种实现。
 
 ## 函数原型
 
@@ -62,17 +61,17 @@ def flash_decode_bnsd_with_topk_idx(
 ## 功能说明
 
 对 BNSD 布局的 KV cache 做 decode：按块（block）计算分数并返回块级 topk 索引，或在全量注意力路径上
-同时返回注意力输出与 topk 索引。三条互斥分支（编号沿用迁移方案；① 原生快路不在新框架内）：
+同时返回注意力输出与 topk 索引。三条互斥分支：
 
-- **② 空 topk**：`disable_index_value=True` 且 `topk<=0`，直接返回 `(None, [QH, B, 0])`。
-- **③ 只选块**：`disable_index_value=True` 且 `topk>0`，逐行逐头计算每个 KV 块的分数，返回
+- **① 空 topk**：`disable_index_value=True` 且 `topk<=0`，直接返回 `(None, [QH, B, 0])`。
+- **② 只选块**：`disable_index_value=True` 且 `topk>0`，逐行逐头计算每个 KV 块的分数，返回
   `(None, topk_idx)`；生产 decode/verify 走该路径。
-- **④ 全量注意力**：`disable_index_value=False`，在一次 KV 扫描中同时产出注意力输出与块分数，
+- **③ 全量注意力**：`disable_index_value=False`，在一次 KV 扫描中同时产出注意力输出与块分数，
   返回 `(o, topk_idx)`。
 
-受支持范围：分支 ②③（score-only）为完整支持范围，包括 `score_type` 的 `max`/`lse`、
+受支持范围：分支 ①②（score-only）为完整支持范围，包括 `score_type` 的 `max`/`lse`、
 `init_blocks`/`local_blocks` 强制块、直连与 `block_table` 两种 page source、`packed_seq_lens`、
-`sanitize_page_ids` 与 `fused_append_local`。分支 ④ 只保留在 Triton 实现中，不在支持与验证范围，
+`sanitize_page_ids` 与 `fused_append_local`。分支 ③ 只保留在 Triton 实现中，不在支持与验证范围，
 `torch_native` 会拒绝该分支。
 
 块分数（`max` 与 `lse` 两种归约，$D$ 为 head_dim，$\sigma$ 为 `sm_scale`，默认 $D^{-1/2}$）：
@@ -119,9 +118,9 @@ $$
 | `disable_index_value` | `bool` | — | — | `False` | `True` 为只选块路径，`False` 为全量注意力路径；torch_native 仅支持 `True`。 |
 | `num_kv_chunks` | `int` 或 `None` | — | — | `None` | 全量注意力的 KV 分块数；`None` 时按 vector core 数自动选择；仅 triton 生效。 |
 | `max_num_kv_chunks` | `int` | — | — | `8` | 自动分块数的 2 的幂上界；仅 triton 生效。 |
-| `use_triton_topk` | `bool` 或 `None` | — | — | `None` | 历史兼容参数，无作用。 |
-| `num_topk_chunks` | `int` 或 `None` | — | — | `None` | 历史兼容参数，无作用。 |
-| `use_chunked_score` | `bool` | — | — | `True` | 历史兼容参数，无作用。 |
+| `use_triton_topk` | `bool` 或 `None` | — | — | `None` | 兼容参数，无作用。 |
+| `num_topk_chunks` | `int` 或 `None` | — | — | `None` | 兼容参数，无作用。 |
+| `use_chunked_score` | `bool` | — | — | `True` | 兼容参数，无作用。 |
 | `score_blocks_per_chunk` | `int` | — | — | `16` | 每个 score 程序的目标块数；仅 triton 生效。 |
 | `score_max_chunks` | `int` | — | — | `32` | 分数分块数的上界；仅 triton 生效。 |
 | `req_to_token` | `torch.Tensor` 或 `None` | `[num_requests, max_context]` | `int32`、`int64` | `None` | 直连 page source，按位置给出 token slot；需同时提供 `req_pool_indices`。 |
@@ -133,21 +132,21 @@ $$
 | `runtime_fill_only` | `bool` | — | — | `False` | 按运行期块数选择直接填充候选路径；仅 triton 生效。 |
 | `runtime_score_short_max_blocks` | `int` | — | — | `0` | 短上下文自适应分块的块数阈值；启用时（非 0）必须 `>0` 且与下一参数同时给出，默认 0 表示不启用；仅 triton 生效。 |
 | `runtime_score_short_chunks` | `int` | — | — | `0` | 低于阈值时使用的分块数；启用时（非 0）须为 2 的幂，超过分块总数时按总数截断，默认 0 表示不启用；仅 triton 生效。 |
-| `fused_append_local` | `bool` | — | — | `False` | 融合候选合并与因果 local block 追加；仅 ③ 且 `topk>0` 时输出末槽。 |
-| `use_native` | `bool` | — | — | `True` | 历史兼容参数，无作用（新框架没有原生后端）。 |
+| `fused_append_local` | `bool` | — | — | `False` | 融合候选合并与因果 local block 追加；仅 ② 且 `topk>0` 时输出末槽。 |
+| `use_native` | `bool` | — | — | `True` | 兼容参数，无作用（无原生后端）。 |
 | `impl` | `str` | — | — | `"auto"` | 仅限关键字参数；可选 `"auto"`、`"triton"`、`"torch_native"`。 |
 
 | 返回值 | 类型 | Shape | Dtype | 描述与约束 |
 | --- | --- | --- | --- | --- |
 | `o` | `torch.Tensor` 或 `None` | `[B, QH, D]` | 同 `q` | 只选块路径为 `None`；全量注意力路径（仅 Triton）为新建输出。 |
-| `topk_idx` | `torch.Tensor` | `[QH, B, topk]`，或 ③ 且 `topk>0` 且 `fused_append_local` 时 `[QH, B, topk+1]` | `int32` | 无效、越界或被去重的槽为 `-1`；有效候选耗尽后重复块 0。同分次序未定义。 |
+| `topk_idx` | `torch.Tensor` | `[QH, B, topk]`，或 ② 且 `topk>0` 且 `fused_append_local` 时 `[QH, B, topk+1]` | `int32` | 无效、越界或被去重的槽为 `-1`；有效候选耗尽后重复块 0。同分次序未定义。 |
 
 附加说明：空 topk 分支返回 `[QH, B, 0]`；直连 page source 只支持只选块路径；`sink` 只影响全量注意力的
 softmax 分母。
 
 ## triton 后端
 
-- 使用 CANN Triton kernel，覆盖 ②③④ 三条分支；其中 ④ 仅保留兼容、不在支持与验证范围。按 `max_seqlen` 与运行期长度选择分数分块数。
+- 使用 CANN Triton kernel，覆盖 ①②③ 三条分支；其中 ③ 仅保留兼容、不在支持与验证范围。按 `max_seqlen` 与运行期长度选择分数分块数。
 - `init_blocks`/`local_blocks` 改写只作用于 topk 候选分数。
 - 直连 page source 在 kernel 内完成逻辑块到物理块的 gather，可按需 clamp。
 - `packed_seq_lens=True` 且 `num_kv_heads>1` 时，分数 kernel 与融合 merge 的行映射不一致，不支持该组合（生产
@@ -159,7 +158,7 @@ softmax 分母。
   支持 `score_type` 的 `max`/`lse`、`init_blocks`/`local_blocks` 强制块、直连与 `block_table` 两种
   page source、`packed_seq_lens`、`sanitize_page_ids` 与 `fused_append_local`；`topk<=0` 返回空索引。
 - 全量注意力分支（`disable_index_value=False`）没有参考实现，会以 `AssertionError` 拒绝。
-- 忽略 12 个调度/历史参数：`max_seqlen`、`num_kv_chunks`、`max_num_kv_chunks`、
+- 忽略 12 个调度/兼容参数：`max_seqlen`、`num_kv_chunks`、`max_num_kv_chunks`、
   `score_blocks_per_chunk`、`score_max_chunks`、`runtime_fill_only`、
   `runtime_score_short_max_blocks`、`runtime_score_short_chunks`、`use_native`、`use_triton_topk`、
   `num_topk_chunks`、`use_chunked_score`。
