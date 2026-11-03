@@ -35,6 +35,7 @@
 | [attn_res_mix_fused](operators/hyper_conn/attn_res_mix_fused.md) | `triton`, `torch_native` |
 | [flatten_patches](operators/multimodal/flatten_patches.md) | `torch_native` |
 | [flash_decode_bnsd_with_topk_idx](operators/indexer/flash_decode_bnsd_with_topk_idx.md) | `triton`, `torch_native` |
+| [flash_prefill_bnsd_score](operators/indexer/flash_prefill_bnsd_score.md) | `triton`, `torch_native` |
 
 ## Batch-invariant operators
 
