@@ -36,6 +36,7 @@
 | [flatten_patches](operators/multimodal/flatten_patches.md) | `torch_native` |
 | [flash_decode_bnsd_with_topk_idx](operators/indexer/flash_decode_bnsd_with_topk_idx.md) | `triton`、`torch_native` |
 | [flash_prefill_bnsd_score](operators/indexer/flash_prefill_bnsd_score.md) | `triton`、`torch_native` |
+| [flash_prefill_bnsd_score_attn](operators/indexer/flash_prefill_bnsd_score_attn.md) | `triton`、`torch_native` |
 | [flash_prefill_bnsd_topk_from_score](operators/indexer/flash_prefill_bnsd_topk_from_score.md) | `triton`、`torch_native` |
 
 ## batch invariant 算子
