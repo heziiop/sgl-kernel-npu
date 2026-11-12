@@ -411,15 +411,16 @@ chunk_kda_fwd(const at::Tensor &q, const at::Tensor &k, const at::Tensor &v, con
                 "ACLNN workspace size exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, q.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
+    const sgl_cann::OpApiContext opApi(stream);
     std::array<at::Tensor, 21> tensors{qHead,       kHead,         vHead,           gHead,           betaHead,
                                        aLogTensor,  dtBiasTensor,  initStateContig, cuSeqlensContig, chunkIndicesContig,
                                        attnOut,     finalStateOut, gkOut,           aqkOut,          akkOut,
                                        wOut,        uOut,          qgOut,           kgOut,           vNewOut,
                                        hOutInternal};
     for (const auto &tensor : tensors) {
-        if (tensor.defined()) tensor.record_stream(stream);
+        if (tensor.defined()) opApi.record_stream(tensor);
     }
-    workspace.record_stream(stream);
+    opApi.record_stream(workspace);
     std::array<std::shared_ptr<aclTensor>, 21> descriptors{desc0,  desc1,  desc2,  desc3,  desc4,  desc5,  desc6,
                                                            desc7,  desc8,  desc9,  desc10, desc11, desc12, desc13,
                                                            desc14, desc15, desc16, desc17, desc18, desc19, desc20};
@@ -430,7 +431,7 @@ chunk_kda_fwd(const at::Tensor &q, const at::Tensor &k, const at::Tensor &v, con
             "aclnnSglChunkKdaFwd failed: ", aclGetRecentErrMsg());
         return ACL_SUCCESS;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglChunkKdaFwd", launch);
+    opApi.run("aclnnSglChunkKdaFwd", launch);
 
     // ---- post-process outputs to the aclnn-documented user layouts ----
     at::Tensor attn = attnOut;

@@ -1,5 +1,7 @@
 """Public compressor tests; independent state buffers and valid-row comparison."""
 
+import gc
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -452,13 +454,35 @@ def test_compressor_async_execution(execution):
             executor()
             actual["state_cache"].copy_(data["state_cache"])
         stream.synchronize()
-        graph = torch.npu.NPUGraph()
-        with torch.npu.graph(graph, stream=stream, auto_dispatch_capture=True):
-            # Each recorded launch starts with the same history so the final
-            # replay result remains comparable to one reference invocation.
-            for _ in range(32):
-                actual["state_cache"].copy_(data["state_cache"])
-                out = executor()
+        reservations = {}
+        graph = None
+        out = None
+        for calls in (1, 32):
+            gc.collect()
+            torch.npu.synchronize()
+            torch.npu.empty_cache()
+            before = torch.npu.memory_reserved()
+            captured_graph = torch.npu.NPUGraph()
+            with torch.npu.graph(
+                captured_graph, stream=stream, auto_dispatch_capture=True
+            ):
+                # Each launch starts with the same history so the final result
+                # remains comparable to one reference invocation.
+                for _ in range(calls):
+                    actual["state_cache"].copy_(data["state_cache"])
+                    out = executor()
+            stream.synchronize()
+            reservations[calls] = torch.npu.memory_reserved() - before
+            if calls == 1:
+                del out, captured_graph
+                torch.npu.synchronize()
+                torch.npu.empty_cache()
+            else:
+                graph = captured_graph
+        assert reservations[32] <= reservations[1] + 64 * 1024**2, (
+            "Repeated compressor calls retained excessive graph workspace: "
+            f"one call={reservations[1]}, 32 calls={reservations[32]} bytes"
+        )
         # Match the failing service phase: cleanup before the first replay.
         torch.npu.empty_cache()
         torch.npu.synchronize()

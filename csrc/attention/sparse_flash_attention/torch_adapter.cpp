@@ -10,7 +10,6 @@
 
 #include <c10/core/DeviceGuard.h>
 #include <torch/library.h>
-#include <torch_npu/csrc/core/npu/NPUGraphsUtils.h>
 
 #include <array>
 #include <limits>
@@ -215,8 +214,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> sgl_sparse_flash_attention(
 
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, query_input.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const bool capturing =
-        c10_npu::currentStreamCaptureStatusMayInitCtx() == c10_npu::CaptureStatus::Active;
+    const sgl_cann::OpApiContext opApi(stream);
     std::vector<at::Tensor> tensors{query_input,   key_input,   value_input, sparse_indices_input,
                                     attention_out, softmax_max, softmax_sum, workspace};
     for (const auto *tensor : {&block_table_input, &actual_seq_lengths_query_input, &actual_seq_lengths_kv_input,
@@ -228,10 +226,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> sgl_sparse_flash_attention(
     // The graph pool already tracks temporary allocations on the capture
     // stream. record_stream would defer their reclamation until capture ends,
     // retaining one large workspace for every attention layer.
-    if (!capturing) {
-        for (const auto &tensor : tensors) {
-            tensor.record_stream(stream);
-        }
+    for (const auto &tensor : tensors) {
+        opApi.record_stream(tensor);
     }
     auto aclStream = stream.stream(false);
 
@@ -253,15 +249,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> sgl_sparse_flash_attention(
         TORCH_CHECK(result == ACL_SUCCESS, "sparse_flash_attention ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    if (capturing) {
-        // Drain host submissions without synchronizing the device. Releasing
-        // the captured tensors on this thread lets the graph pool reuse the
-        // workspace across layers; the task queue's release thread cannot.
-        TORCH_CHECK(stream.stream() != nullptr, "sparse_flash_attention: failed to drain the host task queue");
-        launch();
-    } else {
-        at_npu::native::OpCommand::RunOpApi("aclnnSglSparseFlashAttention", launch);
-    }
+    opApi.run("aclnnSglSparseFlashAttention", launch);
     return {attention_out, softmax_max, softmax_sum};
 }
 

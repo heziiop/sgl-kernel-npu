@@ -78,14 +78,15 @@ at::Tensor sgemmc_expand(at::Tensor x, at::Tensor weight, at::Tensor lora_indice
 
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, y.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    x.record_stream(stream);
-    weight.record_stream(stream);
-    lora_indices.record_stream(stream);
-    seq_len.record_stream(stream);
-    lora_ranks.record_stream(stream);
-    slice_offsets.record_stream(stream);
-    y.record_stream(stream);
-    workspace.record_stream(stream);
+    const sgl_cann::OpApiContext opApi(stream);
+    opApi.record_stream(x);
+    opApi.record_stream(weight);
+    opApi.record_stream(lora_indices);
+    opApi.record_stream(seq_len);
+    opApi.record_stream(lora_ranks);
+    opApi.record_stream(slice_offsets);
+    opApi.record_stream(y);
+    opApi.record_stream(workspace);
     auto aclStream = stream.stream(false);
 
     // Tensor captures cover the host queue; record_stream covers asynchronous device use.
@@ -96,7 +97,7 @@ at::Tensor sgemmc_expand(at::Tensor x, at::Tensor weight, at::Tensor lora_indice
         TORCH_CHECK(result == ACL_SUCCESS, "sgemmc_expand ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglSgemmcExpand", launch);
+    opApi.run("aclnnSglSgemmcExpand", launch);
 
     // The Ref output is the caller's tensor; no copy-back is needed.
     return y;

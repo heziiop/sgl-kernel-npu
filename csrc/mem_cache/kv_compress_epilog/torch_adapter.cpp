@@ -78,16 +78,17 @@ void kv_compress_epilog(at::Tensor kv_compress_cache, at::Tensor x, at::Tensor s
                 "ACLNN workspace size exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, cache.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
+    const sgl_cann::OpApiContext opApi(stream);
     for (const auto &tensor : tensors)
-        tensor.record_stream(stream);
-    workspace.record_stream(stream);
+        opApi.record_stream(tensor);
+    opApi.record_stream(workspace);
     auto aclStream = stream.stream(false);
     auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
         auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "KvCompressEpilog execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglKvCompressEpilog", launch);
+    opApi.run("aclnnSglKvCompressEpilog", launch);
 }
 }  // namespace
 

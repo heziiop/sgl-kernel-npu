@@ -141,15 +141,16 @@ at::Tensor recurrent_gated_delta_rule(const at::Tensor &mix_qkv, const at::Tenso
                                                         indicesDesc, seedDesc,    cacheDesc, acceptedDesc,
                                                         gammaDesc,   keyGateDesc, outDesc};
     auto stream = c10_npu::getCurrentNPUStream();
+    const sgl_cann::OpApiContext opApi(stream);
     for (const auto &tensor : tensors)
-        tensor.record_stream(stream);
+        opApi.record_stream(tensor);
     auto aclStream = stream.stream(false);
     auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
         const auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "RGDR ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglRecurrentGatedDeltaRule", launch);
+    opApi.run("aclnnSglRecurrentGatedDeltaRule", launch);
     return out;
 }
 }  // namespace

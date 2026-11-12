@@ -194,6 +194,7 @@ std::tuple<at::Tensor &, at::Tensor &, at::Tensor &, at::Tensor &> sgl_mla_prepr
 
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, hidden_state.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
+    const sgl_cann::OpApiContext opApi(stream);
     std::vector<at::Tensor> tensors{
         hidden_state,  gamma0,      beta0,         wdqkv,         descale0,      gamma1,       beta1,
         wuq,           descale1,    gamma2,        cos,           sin,           wuk,          kv_cache,
@@ -202,7 +203,7 @@ std::tuple<at::Tensor &, at::Tensor &, at::Tensor &, at::Tensor &> sgl_mla_prepr
     if (hasCtkvScale) tensors.push_back(*ctkv_scale);
     if (hasQnopeScale) tensors.push_back(*q_nope_scale);
     for (const auto &tensor : tensors) {
-        tensor.record_stream(stream);
+        opApi.record_stream(tensor);
     }
     auto aclStream = stream.stream(false);
 
@@ -217,7 +218,7 @@ std::tuple<at::Tensor &, at::Tensor &, at::Tensor &, at::Tensor &> sgl_mla_prepr
         TORCH_CHECK(result == ACL_SUCCESS, "mla_preprocess ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglMlaPreprocess", launch);
+    opApi.run("aclnnSglMlaPreprocess", launch);
 
     return std::forward_as_tuple(q_out0, kv_cache_out0, q_out1, kv_cache_out1);
 }

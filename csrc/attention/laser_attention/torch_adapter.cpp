@@ -104,15 +104,16 @@ std::tuple<at::Tensor, at::Tensor> la(const at::Tensor &query, const at::Tensor 
     std::vector<std::shared_ptr<aclTensor>> descriptors{qDesc,         kDesc,        vDesc,       attenMaskDesc,
                                                         alibiMaskDesc, dropMaskDesc, softmaxDesc, outDesc};
     auto stream = c10_npu::getCurrentNPUStream();
+    const sgl_cann::OpApiContext opApi(stream);
     for (const auto &tensor : tensors)
-        tensor.record_stream(stream);
+        opApi.record_stream(tensor);
     auto aclStream = stream.stream(false);
     auto launch = [tensors, descriptors, input_layout, workspace, workspaceSize, executor, aclStream]() -> int {
         const auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "laser attention ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglLaserAttention", launch);
+    opApi.run("aclnnSglLaserAttention", launch);
     return std::make_tuple(softmaxLogMaxSum, attentionOut);
 }
 

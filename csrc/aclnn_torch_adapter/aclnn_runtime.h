@@ -6,10 +6,49 @@
 #include <dlfcn.h>
 #include <filesystem>
 #include <memory>
+#include <torch_npu/csrc/core/npu/NPUGraphsUtils.h>
 #include <torch_npu/csrc/core/npu/NPUStream.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
+#include <utility>
 
 namespace sgl_cann {
+
+// Keep host submission and Tensor lifetime handling consistent for ACLNN bridges.
+// The launch callable must retain every Tensor and descriptor used by the device.
+class OpApiContext {
+public:
+    explicit OpApiContext(c10_npu::NPUStream stream)
+        : stream_(stream),
+          capturing_(c10_npu::currentStreamCaptureStatusMayInitCtx() == c10_npu::CaptureStatus::Active)
+    {}
+
+    void record_stream(const at::Tensor &tensor) const
+    {
+        // Capture-stream allocations already belong to the graph pool. Recording
+        // their stream defers recycling until capture ends, including ordinary
+        // intermediate/output tensors, not just the ACLNN workspace.
+        if (!capturing_) tensor.record_stream(stream_);
+    }
+
+    template <typename Launch>
+    void run(const char *name, Launch &&launch) const
+    {
+        if (capturing_) {
+            // stream() submits earlier host-queued work before this direct launch;
+            // it does not wait for device completion. Destroy the callable's
+            // Tensor captures on the capture thread so its graph pool can reuse
+            // temporary storage between successive operators.
+            TORCH_CHECK(stream_.stream() != nullptr, name, ": failed to get capture stream");
+            launch();
+        } else {
+            at_npu::native::OpCommand::RunOpApi(name, std::forward<Launch>(launch));
+        }
+    }
+
+private:
+    c10_npu::NPUStream stream_;
+    bool capturing_;
+};
 
 // Resolve from this extension, never from a process-wide libcust_opapi name.
 inline void *op_api_symbol(const char *name)

@@ -209,14 +209,15 @@ void kv_exchange_submit(const at::Tensor &device_indices, const at::Tensor &host
                 "ACLNN workspace size exceeds the Tensor allocation limit");
     at::Tensor workspace;
     auto stream = c10_npu::getCurrentNPUStream();
+    const sgl_cann::OpApiContext opApi(stream);
     if (workspaceSize > 0) {
         workspace = at::empty({static_cast<int64_t>(workspaceSize)}, device_indices.options().dtype(at::kByte));
-        workspace.record_stream(stream);
+        opApi.record_stream(workspace);
     }
-    device_indices.record_stream(stream);
-    host_indices.record_stream(stream);
+    opApi.record_stream(device_indices);
+    opApi.record_stream(host_indices);
     for (const auto &tensor : device_components) {
-        tensor.record_stream(stream);
+        opApi.record_stream(tensor);
     }
     auto aclStream = stream.stream(false);
     // Keep the Tensor and ACLNN descriptor owners alive through queued launch.
@@ -226,7 +227,7 @@ void kv_exchange_submit(const at::Tensor &device_indices, const at::Tensor &host
         TORCH_CHECK(result == ACL_SUCCESS, "KV exchange ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglKvExchange", launch);
+    opApi.run("aclnnSglKvExchange", launch);
 }
 
 }  // namespace

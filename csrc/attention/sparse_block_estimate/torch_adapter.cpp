@@ -109,8 +109,9 @@ std::tuple<at::Tensor, at::Tensor> sparse_block_estimate(const at::Tensor &query
     TORCH_CHECK(status == ACL_SUCCESS, "call aclnnSglSparseBlockEstimate failed, detail:", aclGetRecentErrMsg());
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, query.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
+    const sgl_cann::OpApiContext opApi(stream);
     for (const auto &tensor : {query, key, mask, count, workspace})
-        tensor.record_stream(stream);
+        opApi.record_stream(tensor);
     auto aclStream = stream.stream(false);
     auto launch = [query, key, mask, count, workspace, qDesc, kDesc, maskDesc, countDesc, qArray, kArray, qLengths,
                    kLengths, layout, workspaceSize, executor, aclStream]() -> int {
@@ -118,7 +119,7 @@ std::tuple<at::Tensor, at::Tensor> sparse_block_estimate(const at::Tensor &query
         TORCH_CHECK(result == ACL_SUCCESS, "call aclnnSglSparseBlockEstimate failed, detail:", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglSparseBlockEstimate", launch);
+    opApi.run("aclnnSglSparseBlockEstimate", launch);
     return {mask, count};
 }
 }  // namespace

@@ -80,14 +80,15 @@ void sgemmc_shrink(at::Tensor x, at::Tensor weight, at::Tensor lora_indices, at:
 
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, y.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    x.record_stream(stream);
-    weight.record_stream(stream);
-    lora_indices.record_stream(stream);
-    seq_len.record_stream(stream);
-    lora_ranks.record_stream(stream);
-    lora_scales.record_stream(stream);
-    y.record_stream(stream);
-    workspace.record_stream(stream);
+    const sgl_cann::OpApiContext opApi(stream);
+    opApi.record_stream(x);
+    opApi.record_stream(weight);
+    opApi.record_stream(lora_indices);
+    opApi.record_stream(seq_len);
+    opApi.record_stream(lora_ranks);
+    opApi.record_stream(lora_scales);
+    opApi.record_stream(y);
+    opApi.record_stream(workspace);
     auto aclStream = stream.stream(false);
 
     // Tensor captures cover the host queue; record_stream covers asynchronous device use.
@@ -98,7 +99,7 @@ void sgemmc_shrink(at::Tensor x, at::Tensor weight, at::Tensor lora_indices, at:
         TORCH_CHECK(result == ACL_SUCCESS, "sgemmc_shrink ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglSgemmcShrink", launch);
+    opApi.run("aclnnSglSgemmcShrink", launch);
 }
 
 }  // namespace

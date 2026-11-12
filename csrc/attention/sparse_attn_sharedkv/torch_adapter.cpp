@@ -187,6 +187,7 @@ std::tuple<at::Tensor, at::Tensor> sgl_sparse_attn_sharedkv(
 
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, q.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
+    const sgl_cann::OpApiContext opApi(stream);
     std::vector<at::Tensor> tensors{q, *ori_kv, *sinks, *metadata, attentionOut, softmaxLse, workspace};
     for (const auto *tensor : {&cmp_kv, &ori_sparse_indices, &cmp_sparse_indices, &ori_block_table, &cmp_block_table,
                                &cu_seqlens_q, &cu_seqlens_ori_kv, &cu_seqlens_cmp_kv, &seqused_q, &seqused_kv}) {
@@ -195,7 +196,7 @@ std::tuple<at::Tensor, at::Tensor> sgl_sparse_attn_sharedkv(
         }
     }
     for (const auto &tensor : tensors) {
-        tensor.record_stream(stream);
+        opApi.record_stream(tensor);
     }
     auto aclStream = stream.stream(false);
 
@@ -209,7 +210,7 @@ std::tuple<at::Tensor, at::Tensor> sgl_sparse_attn_sharedkv(
         TORCH_CHECK(result == ACL_SUCCESS, "sparse_attn_sharedkv ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglSparseAttnSharedkv", launch);
+    opApi.run("aclnnSglSparseAttnSharedkv", launch);
     return std::make_tuple(attentionOut, softmaxLse);
 }
 

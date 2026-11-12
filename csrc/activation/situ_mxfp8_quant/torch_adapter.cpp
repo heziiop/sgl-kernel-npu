@@ -61,11 +61,12 @@ std::tuple<at::Tensor, at::Tensor> situ_mxfp8_quant(const at::Tensor &x, const a
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, x.options().dtype(at::kByte));
 
     auto stream = c10_npu::getCurrentNPUStream();
-    x.record_stream(stream);
-    group_list.record_stream(stream);
-    payload.record_stream(stream);
-    scales.record_stream(stream);
-    workspace.record_stream(stream);
+    const sgl_cann::OpApiContext opApi(stream);
+    opApi.record_stream(x);
+    opApi.record_stream(group_list);
+    opApi.record_stream(payload);
+    opApi.record_stream(scales);
+    opApi.record_stream(workspace);
     auto aclStream = stream.stream(false);
 
     // Captures retain queued host resources; record_stream retains asynchronous device storage.
@@ -75,7 +76,7 @@ std::tuple<at::Tensor, at::Tensor> situ_mxfp8_quant(const at::Tensor &x, const a
         TORCH_CHECK(result == ACL_SUCCESS, "situ_mxfp8_quant execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglSituMxfp8Quant", launch);
+    opApi.run("aclnnSglSituMxfp8Quant", launch);
     return std::make_tuple(payload, scales);
 }
 

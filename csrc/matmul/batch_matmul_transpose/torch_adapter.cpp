@@ -3,7 +3,6 @@
 #include <ATen/MemoryOverlap.h>
 #include <c10/core/DeviceGuard.h>
 #include <torch/library.h>
-#include <torch_npu/csrc/core/npu/NPUGraphsUtils.h>
 #include <array>
 #include <limits>
 #include <string>
@@ -59,13 +58,10 @@ void batch_matmul_transpose(const at::Tensor &a, const at::Tensor &b, at::Tensor
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, a.options().dtype(at::kByte));
     const std::array<at::Tensor, 3> tensors = {a, b, c};
     auto stream = c10_npu::getCurrentNPUStream();
-    const bool capturing =
-        c10_npu::currentStreamCaptureStatusMayInitCtx() == c10_npu::CaptureStatus::Active;
-    if (!capturing) {
-        for (const auto &tensor : tensors)
-            tensor.record_stream(stream);
-        workspace.record_stream(stream);
-    }
+    const sgl_cann::OpApiContext opApi(stream);
+    for (const auto &tensor : tensors)
+        opApi.record_stream(tensor);
+    opApi.record_stream(workspace);
     auto aclStream = stream.stream(false);
     // Captures retain host-queue resources; record_stream covers asynchronous device use.
     auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
@@ -73,14 +69,7 @@ void batch_matmul_transpose(const at::Tensor &a, const at::Tensor &b, at::Tensor
         TORCH_CHECK(result == ACL_SUCCESS, "BatchMatmulTranspose execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    if (capturing) {
-        // Match sparse attention: release graph temporaries on the capture
-        // thread after draining earlier host submissions, without a device wait.
-        TORCH_CHECK(stream.stream() != nullptr, "batch_matmul_transpose: failed to drain the host task queue");
-        launch();
-    } else {
-        at_npu::native::OpCommand::RunOpApi("aclnnSglBatchMatmulTranspose", launch);
-    }
+    opApi.run("aclnnSglBatchMatmulTranspose", launch);
 }
 }  // namespace
 

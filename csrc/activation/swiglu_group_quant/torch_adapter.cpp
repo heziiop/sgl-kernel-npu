@@ -1,7 +1,6 @@
 #include "aclnn_runtime.h"
 #include "aclnn_sgl_swiglu_group_quant.h"
 #include <torch/library.h>
-#include <torch_npu/csrc/core/npu/NPUGraphsUtils.h>
 #include <c10/core/DeviceGuard.h>
 #include <array>
 
@@ -105,10 +104,11 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> swiglu_group_quant(
                                      xd};
     std::array<std::shared_ptr<aclTensor>, 6> desc;
     auto stream = c10_npu::getCurrentNPUStream();
+    const sgl_cann::OpApiContext opApi(stream);
     for (size_t i = 0; i < tensors.size(); ++i) {
         if (tensors[i].defined()) {
             desc[i] = sgl_cann::tensor_descriptor(tensors[i], types[i]);
-            tensors[i].record_stream(stream);
+            opApi.record_stream(tensors[i]);
         }
     }
     static auto query = reinterpret_cast<decltype(&aclnnSglSwigluGroupQuantGetWorkspaceSize)>(
@@ -123,22 +123,13 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> swiglu_group_quant(
     TORCH_CHECK(status == ACL_SUCCESS, "SwiGLU workspace query failed: ", aclGetRecentErrMsg());
     TORCH_CHECK(bytes <= INT64_MAX, "SwiGLU workspace exceeds tensor allocation limit");
     auto ws = at::empty({static_cast<int64_t>(bytes)}, x.options().dtype(at::kByte));
-    ws.record_stream(stream);
+    opApi.record_stream(ws);
     auto launch = [ws, bytes, executor, tensors, desc, stream]() -> int {
         auto result = execute(bytes ? ws.data_ptr() : nullptr, bytes, executor, stream.stream(false));
         TORCH_CHECK(result == ACL_SUCCESS, "SwiGLU execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    // The NPU context is already initialized. Use the exported query directly;
-    // the no-init wrapper references IsContextInitialized(), a private symbol.
-    if (c10_npu::currentStreamCaptureStatusMayInitCtx() == c10_npu::CaptureStatus::Active) {
-        // Keep prior queued operations ahead of this launch, and release the
-        // input/output/workspace captures on the thread that owns the capture.
-        TORCH_CHECK(stream.stream() != nullptr, "swiglu_group_quant: failed to drain the host task queue");
-        launch();
-    } else {
-        at_npu::native::OpCommand::RunOpApi("aclnnSglSwigluGroupQuant", launch);
-    }
+    opApi.run("aclnnSglSwigluGroupQuant", launch);
     return outputs;
 }
 }  // namespace

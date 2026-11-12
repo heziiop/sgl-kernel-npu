@@ -134,15 +134,16 @@ at::Tensor causal_conv1d(const at::Tensor &x, const at::Tensor &weight, const at
     std::vector<std::shared_ptr<aclTensor>> descriptors{xDesc,     weightDesc,  stateDesc,    biasDesc, queryDesc,
                                                         cacheDesc, initialDesc, acceptedDesc, yDesc};
     auto stream = c10_npu::getCurrentNPUStream();
+    const sgl_cann::OpApiContext opApi(stream);
     for (const auto &tensor : tensors)
-        tensor.record_stream(stream);
+        opApi.record_stream(tensor);
     auto aclStream = stream.stream(false);
     auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
         const auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "CausalConv1d ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglCausalConv1d", launch);
+    opApi.run("aclnnSglCausalConv1d", launch);
     return y;
 }
 }  // namespace

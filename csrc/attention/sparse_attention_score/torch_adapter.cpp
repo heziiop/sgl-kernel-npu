@@ -109,8 +109,9 @@ at::Tensor sparse_attention_score(const at::Tensor &query, const at::Tensor &key
     inputs.insert(inputs.end(), {out, lse, workspace});
     descriptors.insert(descriptors.end(), {outDesc, lseDesc});
     const auto stream = c10_npu::getCurrentNPUStream();
+    const sgl_cann::OpApiContext opApi(stream);
     for (const auto &tensor : inputs) {
-        if (tensor.device().type() == c10::DeviceType::PrivateUse1) tensor.record_stream(stream);
+        if (tensor.device().type() == c10::DeviceType::PrivateUse1) opApi.record_stream(tensor);
     }
     const auto aclStream = stream.stream(false);
     auto launch = [inputs, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
@@ -118,7 +119,7 @@ at::Tensor sparse_attention_score(const at::Tensor &query, const at::Tensor &key
         TORCH_CHECK(result == ACL_SUCCESS, "sparse_attention_score execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglSparseAttentionScore", launch);
+    opApi.run("aclnnSglSparseAttentionScore", launch);
     return out;
 }
 }  // namespace

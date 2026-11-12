@@ -107,9 +107,10 @@ at::Tensor apply_token_bitmask(at::Tensor logits, at::Tensor bitmask, c10::optio
                 "ACLNN workspace size exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, workingLogits.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    workingLogits.record_stream(stream);
-    workingBitmask.record_stream(stream);
-    workspace.record_stream(stream);
+    const sgl_cann::OpApiContext opApi(stream);
+    opApi.record_stream(workingLogits);
+    opApi.record_stream(workingBitmask);
+    opApi.record_stream(workspace);
     auto aclStream = stream.stream(false);
     // Tensor captures cover the host queue; record_stream covers asynchronous device use.
     auto launch = [workingLogits, workingBitmask, workspace, logitsDesc, maskDesc, workspaceSize, executor,
@@ -118,7 +119,7 @@ at::Tensor apply_token_bitmask(at::Tensor logits, at::Tensor bitmask, c10::optio
         TORCH_CHECK(result == ACL_SUCCESS, "Bitmask ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglApplyTokenBitMask", launch);
+    opApi.run("aclnnSglApplyTokenBitMask", launch);
 
     // Copy results back
     auto result = needsPadding ? workingLogits.narrow(1, 0, vocabSize) : workingLogits;

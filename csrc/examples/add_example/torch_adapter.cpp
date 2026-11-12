@@ -40,10 +40,11 @@ at::Tensor add_example(const at::Tensor &x1, const at::Tensor &x2)
                 "ACLNN workspace exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, x1.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    x1.record_stream(stream);
-    x2.record_stream(stream);
-    y.record_stream(stream);
-    workspace.record_stream(stream);
+    const sgl_cann::OpApiContext opApi(stream);
+    opApi.record_stream(x1);
+    opApi.record_stream(x2);
+    opApi.record_stream(y);
+    opApi.record_stream(workspace);
     auto aclStream = stream.stream(false);
     // Captures protect the host queue; record_stream protects asynchronous device use.
     auto launch = [x1, x2, y, workspace, x1Desc, x2Desc, yDesc, workspaceSize, executor, aclStream]() -> int {
@@ -51,7 +52,7 @@ at::Tensor add_example(const at::Tensor &x1, const at::Tensor &x2)
         TORCH_CHECK(result == ACL_SUCCESS, "AddExample ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };
-    at_npu::native::OpCommand::RunOpApi("aclnnSglAddExample", launch);
+    opApi.run("aclnnSglAddExample", launch);
     return y;
 }
 }  // namespace
