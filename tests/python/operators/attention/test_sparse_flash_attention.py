@@ -13,8 +13,13 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tests.python.utils.accuracy import check_accuracy
-from tests.python.utils.common import make_executor, require_distinct_impls
+from tests.python.utils.accuracy import assert_accuracy, check_accuracy
+from tests.python.utils.common import (
+    get_test_impls,
+    make_executor,
+    require_distinct_impls,
+    require_test_impl,
+)
 from tests.python.utils.performance import check_performance
 from tests.python.utils.standards import AccuracyStandard
 
@@ -34,6 +39,48 @@ perf_shape = [
 NOPE_DIM = 512
 ROPE_DIM = 64
 BLOCK_SIZE = 16
+
+
+@pytest.mark.extra_checks
+def test_sparse_flash_attention_graph_workspace_reuse():
+    """Layer repetitions must reuse workspace and replay with updated inputs."""
+    from sgl_kernel_npu.operators.attention import sparse_flash_attention
+
+    impl, _ = get_test_impls()
+    require_test_impl(sparse_flash_attention, impl)
+    if impl not in ("auto", "ascendc"):
+        pytest.skip("Graph workspace reuse targets the native implementation")
+    data = generate_data(torch.bfloat16, return_softmax_lse=True)
+    stream = torch.npu.Stream()
+    stream.wait_stream(torch.npu.current_stream())
+    with torch.npu.stream(stream):
+        sparse_flash_attention(**data, impl=impl)
+    stream.synchronize()
+
+    graphs, outputs, reservations = [], [], []
+    for calls in (1, 32):
+        before = torch.npu.memory_reserved()
+        graph = torch.npu.NPUGraph()
+        with torch.npu.graph(graph, stream=stream):
+            for _ in range(calls):
+                out = sparse_flash_attention(**data, impl=impl)
+        stream.synchronize()
+        reservations.append(torch.npu.memory_reserved() - before)
+        graphs.append(graph)
+        outputs.append(out)
+    assert reservations[1] <= 3 * reservations[0] + 16 * 1024**2, (
+        "Repeated attention calls retained per-layer graph workspace: "
+        f"one call={reservations[0]}, 32 calls={reservations[1]} bytes"
+    )
+
+    # Reclaim uncaptured allocations before replay, then change a graph input.
+    torch.npu.empty_cache()
+    data["query"].mul_(0.5)
+    expected = sparse_flash_attention(**data, impl=impl)
+    for graph, out in zip(graphs, outputs):
+        graph.replay()
+        torch.npu.synchronize()
+        assert_accuracy(out, expected, standard=_STANDARD)
 
 
 def _randn(generator, shape, dtype, scale=1.0):

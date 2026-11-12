@@ -166,6 +166,32 @@ def test_batch_matmul_transpose_modes(
 
 
 @pytest.mark.extra_checks
+def test_batch_matmul_transpose_graph_replay():
+    from sgl_kernel_npu.operators.matmul import batch_matmul_transpose
+
+    impl, _ = get_test_impls()
+    require_test_impl(batch_matmul_transpose, impl)
+    if impl not in ("auto", "ascendc"):
+        pytest.skip("Graph replay targets the native implementation")
+    a, b, c = generate_test_data((16, 64, 512, 256), torch.bfloat16, "ND", "random")
+    stream = torch.npu.Stream()
+    stream.wait_stream(torch.npu.current_stream())
+    with torch.npu.stream(stream):
+        batch_matmul_transpose(a, b, c, impl=impl)
+    stream.synchronize()
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph, stream=stream):
+        for _ in range(32):
+            batch_matmul_transpose(a, b, c, impl=impl)
+    torch.npu.empty_cache()
+    a.mul_(0.5)
+    expected = torch.einsum("mbk,bkn->mbn", a.float(), b.float()).to(c.dtype)
+    graph.replay()
+    torch.npu.synchronize()
+    assert_accuracy(c, expected)
+
+
+@pytest.mark.extra_checks
 @pytest.mark.parametrize(
     "invalid",
     [
