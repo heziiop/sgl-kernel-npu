@@ -104,7 +104,7 @@ std::tuple<at::Tensor, at::Tensor> la(const at::Tensor &query, const at::Tensor 
     std::vector<std::shared_ptr<aclTensor>> descriptors{qDesc,         kDesc,        vDesc,       attenMaskDesc,
                                                         alibiMaskDesc, dropMaskDesc, softmaxDesc, outDesc};
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {softmaxLogMaxSum, attentionOut, workspace});
     for (const auto &tensor : tensors)
         opApi.record_stream(tensor);
     auto aclStream = stream.stream(false);

@@ -1,10 +1,13 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/util/SmallVector.h>
 #include <acl/acl.h>
 #include <aclnn/acl_meta.h>
+#include <algorithm>
 #include <dlfcn.h>
 #include <filesystem>
+#include <initializer_list>
 #include <memory>
 #include <torch_npu/csrc/core/npu/NPUGraphsUtils.h>
 #include <torch_npu/csrc/core/npu/NPUStream.h>
@@ -17,17 +20,32 @@ namespace sgl_cann {
 // The launch callable must retain every Tensor and descriptor used by the device.
 class OpApiContext {
 public:
-    explicit OpApiContext(c10_npu::NPUStream stream)
-        : stream_(stream),
-          capturing_(c10_npu::currentStreamCaptureStatusMayInitCtx() == c10_npu::CaptureStatus::Active)
-    {}
+    // Only list tensors newly allocated by this adapter on stream. The adapter
+    // must access them only on stream, and their owners must outlive this context.
+    // Caller-owned inputs, outputs and state must keep stream recording: capture
+    // alone does not make their allocation stream safe to reuse their storage.
+    explicit OpApiContext(c10_npu::NPUStream stream, std::initializer_list<at::Tensor> local_tensors = {})
+        : stream_(stream), capturing_(c10_npu::currentStreamCaptureStatusMayInitCtx() == c10_npu::CaptureStatus::Active)
+    {
+        if (capturing_) {
+            for (const auto &tensor : local_tensors) {
+                if (tensor.defined()) capture_local_storage_.push_back(tensor.storage().unsafeGetStorageImpl());
+            }
+        }
+    }
 
     void record_stream(const at::Tensor &tensor) const
     {
-        // Capture-stream allocations already belong to the graph pool. Recording
-        // their stream defers recycling until capture ends, including ordinary
-        // intermediate/output tensors, not just the ACLNN workspace.
-        if (!capturing_) tensor.record_stream(stream_);
+        // The allocator reuses blocks on their allocation stream. These local
+        // tensors can be reused in stream order; recording them would instead
+        // retain each invocation's storage until capture ends. Everything else
+        // may have been allocated on another stream and needs lifetime tracking.
+        if (capturing_ && tensor.defined() &&
+            std::find(capture_local_storage_.begin(), capture_local_storage_.end(),
+                      tensor.storage().unsafeGetStorageImpl()) != capture_local_storage_.end()) {
+            return;
+        }
+        tensor.record_stream(stream_);
     }
 
     template <typename Launch>
@@ -48,6 +66,7 @@ public:
 private:
     c10_npu::NPUStream stream_;
     bool capturing_;
+    c10::SmallVector<const c10::StorageImpl *, 4> capture_local_storage_;
 };
 
 // Resolve from this extension, never from a process-wide libcust_opapi name.

@@ -97,7 +97,7 @@ at::Tensor ada_block_sparse_attention(const at::Tensor &query, const at::Tensor 
     std::vector<at::Tensor> tensors{q, k, v, mask, countTable, attentionOut, workspace};
     std::vector<std::shared_ptr<aclTensor>> descriptors{qDesc, kDesc, vDesc, maskDesc, countDesc, outDesc};
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {attentionOut, workspace});
     for (const auto &tensor : tensors)
         opApi.record_stream(tensor);
     auto aclStream = stream.stream(false);

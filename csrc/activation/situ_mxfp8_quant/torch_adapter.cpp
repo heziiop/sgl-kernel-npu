@@ -61,7 +61,7 @@ std::tuple<at::Tensor, at::Tensor> situ_mxfp8_quant(const at::Tensor &x, const a
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, x.options().dtype(at::kByte));
 
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {payload, scales, workspace});
     opApi.record_stream(x);
     opApi.record_stream(group_list);
     opApi.record_stream(payload);

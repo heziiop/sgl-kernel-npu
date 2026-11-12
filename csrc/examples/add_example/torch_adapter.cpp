@@ -40,7 +40,7 @@ at::Tensor add_example(const at::Tensor &x1, const at::Tensor &x2)
                 "ACLNN workspace exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, x1.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {y, workspace});
     opApi.record_stream(x1);
     opApi.record_stream(x2);
     opApi.record_stream(y);

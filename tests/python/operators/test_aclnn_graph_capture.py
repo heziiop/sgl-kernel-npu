@@ -53,7 +53,9 @@ def _make_graph_case(name):
         return getattr(api, name), (), data, ()
     if name == "chunk_kda_fwd":
         mod = importlib.import_module(root + "attention.kda.test_" + name)
-        data = mod.generate_data((1, 256, 8, 8, 128, 128, 64), outputs=False, device="npu")
+        data = mod.generate_data(
+            (1, 256, 8, 8, 128, 128, 64), outputs=False, device="npu"
+        )
         api = importlib.import_module("sgl_kernel_npu.operators.attention.kda")
         return getattr(api, name), (), data, ()
     if name == "laser_attention":
@@ -76,7 +78,9 @@ def _make_graph_case(name):
     if name == "mlp_lightning_indexer":
         mod = importlib.import_module(root + "indexer.test_" + name)
         data = mod.generate_data(dict(q_lens=[2, 3], k_lens=[32, 64]), torch.bfloat16)
-        data = {k: v.npu() if isinstance(v, torch.Tensor) else v for k, v in data.items()}
+        data = {
+            k: v.npu() if isinstance(v, torch.Tensor) else v for k, v in data.items()
+        }
         api = importlib.import_module("sgl_kernel_npu.operators.indexer")
         return getattr(api, name), (), data, ()
     if name == "mla_preprocess":
@@ -90,7 +94,9 @@ def _make_graph_case(name):
             root + "attention.test_flash_decode_bnsd_with_gqa_share_sparse"
         )
         data = mod.build_inputs(seq_lens=(16384,), page="table")
-        data = {k: v.npu() if isinstance(v, torch.Tensor) else v for k, v in data.items()}
+        data = {
+            k: v.npu() if isinstance(v, torch.Tensor) else v for k, v in data.items()
+        }
         api = importlib.import_module("sgl_kernel_npu.operators.attention")
         return api.flash_decode_bnsd_with_gqa_share_sparse, (), data, ()
     raise ValueError(name)
@@ -201,7 +207,11 @@ def test_aclnn_graph_workspace_reuse(operator, auto_dispatch_capture):
             # Match service startup, which cleans the allocator before replay.
             torch.npu.empty_cache()
             _check_replay(
-                graph, _defined_outputs(operator, output), mutable, expected, expected_state
+                graph,
+                _defined_outputs(operator, output),
+                mutable,
+                expected,
+                expected_state,
             )
         finally:
             # Do not retain graph outputs in Python after deleting the graph.
@@ -213,3 +223,61 @@ def test_aclnn_graph_workspace_reuse(operator, auto_dispatch_capture):
         f"{operator} retained per-call graph temporaries: "
         f"one call={reservations[1]}, 32 calls={reservations[32]} bytes"
     )
+
+
+@pytest.mark.extra_checks
+@pytest.mark.parametrize("auto_dispatch_capture", [False, True])
+def test_aclnn_graph_cross_stream_input_lifetime(auto_dispatch_capture):
+    from sgl_kernel_npu.operators.matmul import batch_matmul_transpose
+    from sgl_kernel_npu.operators.utils.generation import Generation, get_hardware
+    from tests.python.utils.common import get_test_impls, require_test_impl
+
+    if get_hardware().generation != Generation.ARCH22:
+        pytest.skip("This regression fixture targets arch22")
+    if get_test_impls()[0] not in ("auto", "ascendc"):
+        pytest.skip("Capture lifetime checks target the native ACLNN adapters")
+    require_test_impl(batch_matmul_transpose, "ascendc")
+    shape = (16, 64, 512)
+    b = torch.ones((64, 512, 256), dtype=torch.bfloat16, device="npu")
+    c = torch.empty((16, 64, 256), dtype=torch.bfloat16, device="npu")
+    warm = torch.ones(shape, dtype=torch.bfloat16, device="npu")
+    batch_matmul_transpose(warm, b, c, impl="ascendc")
+    torch.npu.synchronize()
+    del warm
+    torch.npu.empty_cache()
+
+    producer = torch.npu.Stream()
+    consumer = torch.npu.Stream()
+    producer.wait_stream(torch.npu.current_stream())
+    graph = torch.npu.NPUGraph()
+    replacement = None
+    try:
+        with torch.npu.graph(
+            graph, stream=producer, auto_dispatch_capture=auto_dispatch_capture
+        ):
+            x = torch.ones(shape, dtype=torch.bfloat16, device="npu")
+            input_ptr = x.data_ptr()
+            # Establish the read dependency, then let the adapter protect x's
+            # lifetime on the other stream. Do not record it in the test.
+            consumer.wait_stream(producer)
+            with torch.npu.stream(consumer):
+                batch_matmul_transpose(x, b, c, impl="ascendc")
+            del x
+            # The allocating stream must not reuse x before joining consumer.
+            replacement = torch.empty(shape, dtype=torch.bfloat16, device="npu")
+            replacement.fill_(2)
+            prematurely_reused = input_ptr == replacement.data_ptr()
+            producer.wait_stream(consumer)
+        torch.npu.synchronize()
+        assert not prematurely_reused, "Input storage reused before consumer joined"
+        for _ in range(3):
+            c.zero_()
+            torch.npu.synchronize()
+            graph.replay()
+            torch.npu.synchronize()
+            torch.testing.assert_close(c.cpu(), torch.full_like(c, 512, device="cpu"))
+    finally:
+        del graph, replacement, producer, consumer
+        gc.collect()
+        torch.npu.synchronize()
+        torch.npu.empty_cache()

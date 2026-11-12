@@ -134,7 +134,7 @@ at::Tensor causal_conv1d(const at::Tensor &x, const at::Tensor &weight, const at
     std::vector<std::shared_ptr<aclTensor>> descriptors{xDesc,     weightDesc,  stateDesc,    biasDesc, queryDesc,
                                                         cacheDesc, initialDesc, acceptedDesc, yDesc};
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {y, workspace});
     for (const auto &tensor : tensors)
         opApi.record_stream(tensor);
     auto aclStream = stream.stream(false);

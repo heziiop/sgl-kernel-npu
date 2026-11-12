@@ -209,11 +209,11 @@ void kv_exchange_submit(const at::Tensor &device_indices, const at::Tensor &host
                 "ACLNN workspace size exceeds the Tensor allocation limit");
     at::Tensor workspace;
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
     if (workspaceSize > 0) {
         workspace = at::empty({static_cast<int64_t>(workspaceSize)}, device_indices.options().dtype(at::kByte));
-        opApi.record_stream(workspace);
     }
+    const sgl_cann::OpApiContext opApi(stream, {workspace});
+    if (workspace.defined()) opApi.record_stream(workspace);
     opApi.record_stream(device_indices);
     opApi.record_stream(host_indices);
     for (const auto &tensor : device_components) {

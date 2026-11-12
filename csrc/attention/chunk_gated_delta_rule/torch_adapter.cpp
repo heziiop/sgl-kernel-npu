@@ -114,7 +114,7 @@ chunk_gated_delta_rule(const at::Tensor &query, const at::Tensor &key, const at:
     std::vector<std::shared_ptr<aclTensor>> descriptors{qDesc,       kDesc,     vDesc,     betaDesc, stateDesc,
                                                         lengthsDesc, gammaDesc, chunkDesc, outDesc,  finalDesc};
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {out, finalState, workspace});
     for (const auto &tensor : tensors)
         opApi.record_stream(tensor);
     auto aclStream = stream.stream(false);

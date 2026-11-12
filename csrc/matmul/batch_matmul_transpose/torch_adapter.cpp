@@ -58,7 +58,7 @@ void batch_matmul_transpose(const at::Tensor &a, const at::Tensor &b, at::Tensor
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, a.options().dtype(at::kByte));
     const std::array<at::Tensor, 3> tensors = {a, b, c};
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {workspace});
     for (const auto &tensor : tensors)
         opApi.record_stream(tensor);
     opApi.record_stream(workspace);

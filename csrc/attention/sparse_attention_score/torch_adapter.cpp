@@ -109,7 +109,7 @@ at::Tensor sparse_attention_score(const at::Tensor &query, const at::Tensor &key
     inputs.insert(inputs.end(), {out, lse, workspace});
     descriptors.insert(descriptors.end(), {outDesc, lseDesc});
     const auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {out, lse, workspace});
     for (const auto &tensor : inputs) {
         if (tensor.device().type() == c10::DeviceType::PrivateUse1) opApi.record_stream(tensor);
     }

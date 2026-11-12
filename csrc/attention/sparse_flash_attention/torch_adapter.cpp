@@ -214,7 +214,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> sgl_sparse_flash_attention(
 
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, query_input.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {attention_out, softmax_max, softmax_sum, workspace});
     std::vector<at::Tensor> tensors{query_input,   key_input,   value_input, sparse_indices_input,
                                     attention_out, softmax_max, softmax_sum, workspace};
     for (const auto *tensor : {&block_table_input, &actual_seq_lengths_query_input, &actual_seq_lengths_kv_input,
@@ -223,9 +223,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> sgl_sparse_flash_attention(
             tensors.push_back(**tensor);
         }
     }
-    // The graph pool already tracks temporary allocations on the capture
-    // stream. record_stream would defer their reclamation until capture ends,
-    // retaining one large workspace for every attention layer.
+    // Skip capture recording only for the outputs/workspace allocated above.
+    // Inputs may come from another stream and still need lifetime tracking.
     for (const auto &tensor : tensors) {
         opApi.record_stream(tensor);
     }

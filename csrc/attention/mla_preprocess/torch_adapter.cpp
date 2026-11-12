@@ -194,7 +194,7 @@ std::tuple<at::Tensor &, at::Tensor &, at::Tensor &, at::Tensor &> sgl_mla_prepr
 
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, hidden_state.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {workspace});
     std::vector<at::Tensor> tensors{
         hidden_state,  gamma0,      beta0,         wdqkv,         descale0,      gamma1,       beta1,
         wuq,           descale1,    gamma2,        cos,           sin,           wuk,          kv_cache,

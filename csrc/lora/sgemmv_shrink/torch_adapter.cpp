@@ -77,7 +77,7 @@ void sgemmv_shrink(at::Tensor x, at::Tensor weight, at::Tensor lora_indices, at:
 
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, y.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {workspace});
     opApi.record_stream(x);
     opApi.record_stream(weight);
     opApi.record_stream(lora_indices);

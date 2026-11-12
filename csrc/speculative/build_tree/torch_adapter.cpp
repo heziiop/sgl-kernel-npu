@@ -56,7 +56,7 @@ void build_tree(const at::Tensor &parentList, const at::Tensor &selectedIndex, c
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, parentList.options().dtype(at::kByte));
     tensors.push_back(workspace);
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {workspace});
     for (const auto &tensor : tensors)
         opApi.record_stream(tensor);
     auto aclStream = stream.stream(false);

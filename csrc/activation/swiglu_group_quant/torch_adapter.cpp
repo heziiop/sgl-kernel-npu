@@ -104,11 +104,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> swiglu_group_quant(
                                      xd};
     std::array<std::shared_ptr<aclTensor>, 6> desc;
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
     for (size_t i = 0; i < tensors.size(); ++i) {
         if (tensors[i].defined()) {
             desc[i] = sgl_cann::tensor_descriptor(tensors[i], types[i]);
-            opApi.record_stream(tensors[i]);
         }
     }
     static auto query = reinterpret_cast<decltype(&aclnnSglSwigluGroupQuantGetWorkspaceSize)>(
@@ -123,6 +121,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> swiglu_group_quant(
     TORCH_CHECK(status == ACL_SUCCESS, "SwiGLU workspace query failed: ", aclGetRecentErrMsg());
     TORCH_CHECK(bytes <= INT64_MAX, "SwiGLU workspace exceeds tensor allocation limit");
     auto ws = at::empty({static_cast<int64_t>(bytes)}, x.options().dtype(at::kByte));
+    const sgl_cann::OpApiContext opApi(stream, {y, scale, origin, ws});
+    for (const auto &tensor : tensors) {
+        if (tensor.defined()) opApi.record_stream(tensor);
+    }
     opApi.record_stream(ws);
     auto launch = [ws, bytes, executor, tensors, desc, stream]() -> int {
         auto result = execute(bytes ? ws.data_ptr() : nullptr, bytes, executor, stream.stream(false));

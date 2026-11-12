@@ -411,7 +411,8 @@ chunk_kda_fwd(const at::Tensor &q, const at::Tensor &k, const at::Tensor &v, con
                 "ACLNN workspace size exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, q.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {attnOut, aqkOut, akkOut, finalStateOut, gkOut, wOut, uOut, qgOut, kgOut,
+                                                vNewOut, hOutInternal, workspace});
     std::array<at::Tensor, 21> tensors{qHead,       kHead,         vHead,           gHead,           betaHead,
                                        aLogTensor,  dtBiasTensor,  initStateContig, cuSeqlensContig, chunkIndicesContig,
                                        attnOut,     finalStateOut, gkOut,           aqkOut,          akkOut,

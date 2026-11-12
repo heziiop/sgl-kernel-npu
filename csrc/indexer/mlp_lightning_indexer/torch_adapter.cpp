@@ -102,7 +102,7 @@ std::tuple<at::Tensor, at::Tensor> mlp_lightning_indexer(
 
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, query.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {sparseIndices, sparseValues, workspace});
     for (const auto &tensor : tensors) {
         if (tensor.defined() && tensor.device().type() == c10::DeviceType::PrivateUse1) {
             opApi.record_stream(tensor);

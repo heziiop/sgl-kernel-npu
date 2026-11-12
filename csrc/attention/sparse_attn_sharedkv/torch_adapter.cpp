@@ -187,7 +187,7 @@ std::tuple<at::Tensor, at::Tensor> sgl_sparse_attn_sharedkv(
 
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, q.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {attentionOut, softmaxLse, workspace});
     std::vector<at::Tensor> tensors{q, *ori_kv, *sinks, *metadata, attentionOut, softmaxLse, workspace};
     for (const auto *tensor : {&cmp_kv, &ori_sparse_indices, &cmp_sparse_indices, &ori_block_table, &cmp_block_table,
                                &cu_seqlens_q, &cu_seqlens_ori_kv, &cu_seqlens_cmp_kv, &seqused_q, &seqused_kv}) {

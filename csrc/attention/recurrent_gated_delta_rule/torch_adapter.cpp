@@ -141,7 +141,7 @@ at::Tensor recurrent_gated_delta_rule(const at::Tensor &mix_qkv, const at::Tenso
                                                         indicesDesc, seedDesc,    cacheDesc, acceptedDesc,
                                                         gammaDesc,   keyGateDesc, outDesc};
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {out, workspace});
     for (const auto &tensor : tensors)
         opApi.record_stream(tensor);
     auto aclStream = stream.stream(false);

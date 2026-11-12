@@ -28,7 +28,7 @@ inline at::Tensor Launch(at::Tensor req_indices, at::Tensor token_pool, at::Tens
                 "ACLNN workspace size exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, target.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream);
+    const sgl_cann::OpApiContext opApi(stream, {workspace});
     for (const auto &tensor : tensors)
         opApi.record_stream(tensor);
     opApi.record_stream(workspace);
