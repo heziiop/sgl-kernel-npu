@@ -227,7 +227,7 @@ def test_aclnn_graph_workspace_reuse(operator, auto_dispatch_capture):
 
 @pytest.mark.extra_checks
 @pytest.mark.parametrize("auto_dispatch_capture", [False, True])
-def test_aclnn_graph_cross_stream_input_lifetime(auto_dispatch_capture):
+def test_aclnn_graph_caller_records_cross_stream_input(auto_dispatch_capture):
     from sgl_kernel_npu.operators.matmul import batch_matmul_transpose
     from sgl_kernel_npu.operators.utils.generation import Generation, get_hardware
     from tests.python.utils.common import get_test_impls, require_test_impl
@@ -257,11 +257,12 @@ def test_aclnn_graph_cross_stream_input_lifetime(auto_dispatch_capture):
         ):
             x = torch.ones(shape, dtype=torch.bfloat16, device="npu")
             input_ptr = x.data_ptr()
-            # Establish the read dependency, then let the adapter protect x's
-            # lifetime on the other stream. Do not record it in the test.
+            # The caller owns both the read dependency and the lifetime of an
+            # input passed to an operator on another stream.
             consumer.wait_stream(producer)
             with torch.npu.stream(consumer):
                 batch_matmul_transpose(x, b, c, impl="ascendc")
+            x.record_stream(consumer)
             del x
             # The allocating stream must not reuse x before joining consumer.
             replacement = torch.empty(shape, dtype=torch.bfloat16, device="npu")
@@ -281,3 +282,96 @@ def test_aclnn_graph_cross_stream_input_lifetime(auto_dispatch_capture):
         gc.collect()
         torch.npu.synchronize()
         torch.npu.empty_cache()
+
+
+@pytest.mark.extra_checks
+@pytest.mark.parametrize("auto_dispatch_capture", [False, True])
+def test_aclnn_graph_same_stream_temporary_input_reuse(auto_dispatch_capture):
+    from sgl_kernel_npu.operators.matmul import batch_matmul_transpose
+    from sgl_kernel_npu.operators.utils.generation import Generation, get_hardware
+    from tests.python.utils.common import get_test_impls, require_test_impl
+
+    if get_hardware().generation != Generation.ARCH22:
+        pytest.skip("This regression fixture targets arch22")
+    if get_test_impls()[0] not in ("auto", "ascendc"):
+        pytest.skip("Capture lifetime checks target the native ACLNN adapters")
+    require_test_impl(batch_matmul_transpose, "ascendc")
+    shape = (128, 64, 512)
+    b = torch.ones((64, 512, 256), dtype=torch.bfloat16, device="npu")
+    c = torch.empty((128, 64, 256), dtype=torch.bfloat16, device="npu")
+    warm = torch.ones(shape, dtype=torch.bfloat16, device="npu")
+    batch_matmul_transpose(warm, b, c, impl="ascendc")
+    torch.npu.synchronize()
+    del warm
+    stream = torch.npu.Stream()
+    stream.wait_stream(torch.npu.current_stream())
+    reservations = {}
+    for calls in (1, 32):
+        gc.collect()
+        torch.npu.synchronize()
+        torch.npu.empty_cache()
+        before = torch.npu.memory_reserved()
+        graph = torch.npu.NPUGraph()
+        try:
+            with torch.npu.graph(
+                graph, stream=stream, auto_dispatch_capture=auto_dispatch_capture
+            ):
+                for _ in range(calls):
+                    # This storage is external to the adapter, but allocated and
+                    # consumed on the same stream. It needs no record_stream.
+                    x = torch.ones(shape, dtype=torch.bfloat16, device="npu")
+                    batch_matmul_transpose(x, b, c, impl="ascendc")
+                    del x
+            stream.synchronize()
+            reservations[calls] = torch.npu.memory_reserved() - before
+            for _ in range(3):
+                c.zero_()
+                torch.npu.synchronize()
+                graph.replay()
+                torch.npu.synchronize()
+                torch.testing.assert_close(
+                    c.cpu(), torch.full_like(c, 512, device="cpu")
+                )
+        finally:
+            del graph
+            gc.collect()
+            torch.npu.synchronize()
+            torch.npu.empty_cache()
+    assert reservations[32] <= reservations[1] + 32 * 1024**2, (
+        "Adapter retained same-stream caller inputs: "
+        f"one call={reservations[1]}, 32 calls={reservations[32]} bytes"
+    )
+
+
+@pytest.mark.extra_checks
+def test_aclnn_eager_same_stream_temporary_lifetime():
+    from sgl_kernel_npu.operators.matmul import batch_matmul_transpose
+    from sgl_kernel_npu.operators.utils.generation import Generation, get_hardware
+    from tests.python.utils.common import get_test_impls, require_test_impl
+
+    if get_hardware().generation != Generation.ARCH22:
+        pytest.skip("This regression fixture targets arch22")
+    if get_test_impls()[0] not in ("auto", "ascendc"):
+        pytest.skip("Lifetime checks target the native ACLNN adapters")
+    require_test_impl(batch_matmul_transpose, "ascendc")
+    b = torch.ones((64, 512, 256), dtype=torch.bfloat16, device="npu")
+    stream = torch.npu.Stream()
+    stream.wait_stream(torch.npu.current_stream())
+    outputs = []
+    with torch.npu.stream(stream):
+        for i in range(48):
+            x = torch.full((16, 64, 512), i % 3 + 1, dtype=torch.bfloat16, device="npu")
+            c = torch.empty((16, 64, 256), dtype=torch.bfloat16, device="npu")
+            batch_matmul_transpose(x, b, c, impl="ascendc")
+            del x
+            # Apply allocation pressure before synchronizing the host/device
+            # queues. The launch must retain its inputs until submission.
+            pressure = torch.empty((16, 64, 512), dtype=torch.bfloat16, device="npu")
+            pressure.fill_(-7)
+            del pressure
+            outputs.append(c)
+    stream.synchronize()
+    for i, c in enumerate(outputs):
+        torch.testing.assert_close(
+            c.cpu(), torch.full_like(c, 512 * (i % 3 + 1), device="cpu")
+        )

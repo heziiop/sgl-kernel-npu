@@ -28,12 +28,9 @@ inline at::Tensor Launch(at::Tensor req_indices, at::Tensor token_pool, at::Tens
                 "ACLNN workspace size exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, target.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream, {workspace});
-    for (const auto &tensor : tensors)
-        opApi.record_stream(tensor);
-    opApi.record_stream(workspace);
+    const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    // Captures retain queued host resources; record_stream retains asynchronous device storage.
+    // Tensor captures keep storage alive until the queued device launch is submitted.
     auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream, execute, name]() -> int {
         auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, name, " execution failed: ", aclGetRecentErrMsg());

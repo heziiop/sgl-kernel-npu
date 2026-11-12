@@ -58,12 +58,9 @@ void batch_matmul_transpose(const at::Tensor &a, const at::Tensor &b, at::Tensor
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, a.options().dtype(at::kByte));
     const std::array<at::Tensor, 3> tensors = {a, b, c};
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream, {workspace});
-    for (const auto &tensor : tensors)
-        opApi.record_stream(tensor);
-    opApi.record_stream(workspace);
+    const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    // Captures retain host-queue resources; record_stream covers asynchronous device use.
+    // Tensor captures keep storage alive until the queued device launch is submitted.
     auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
         const auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "BatchMatmulTranspose execution failed: ", aclGetRecentErrMsg());

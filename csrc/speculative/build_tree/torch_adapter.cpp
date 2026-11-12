@@ -56,11 +56,9 @@ void build_tree(const at::Tensor &parentList, const at::Tensor &selectedIndex, c
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, parentList.options().dtype(at::kByte));
     tensors.push_back(workspace);
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream, {workspace});
-    for (const auto &tensor : tensors)
-        opApi.record_stream(tensor);
+    const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    // Captures cover the host queue; stream recording covers asynchronous access.
+    // Tensor captures keep storage alive until the queued device launch is submitted.
     auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
         auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "build_tree ACLNN execution failed: ", aclGetRecentErrMsg());

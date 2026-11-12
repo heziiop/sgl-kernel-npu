@@ -73,11 +73,7 @@ at::Tensor compute_n_gram_ids(const at::Tensor &oe_weights, const at::Tensor &oe
     TORCH_CHECK(status == ACL_SUCCESS, "ComputeNGramIds workspace query failed: ", aclGetRecentErrMsg());
     auto workspace = at::empty({static_cast<int64_t>(workspace_size)}, output.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream, {output, workspace});
-    for (auto &tensor : tensors) {
-        opApi.record_stream(tensor);
-    }
-    opApi.record_stream(workspace);
+    const sgl_cann::OpApiContext opApi(stream);
     auto acl_stream = stream.stream(false);
     // Keep Tensor storage and ACL descriptors alive until the host queue executes the call.
     auto launch = [tensors, descriptors, workspace, workspace_size, executor, acl_stream]() -> int {

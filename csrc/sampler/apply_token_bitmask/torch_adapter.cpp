@@ -107,12 +107,9 @@ at::Tensor apply_token_bitmask(at::Tensor logits, at::Tensor bitmask, c10::optio
                 "ACLNN workspace size exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, workingLogits.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream, {workspace});
-    opApi.record_stream(workingLogits);
-    opApi.record_stream(workingBitmask);
-    opApi.record_stream(workspace);
+    const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    // Tensor captures cover the host queue; record_stream covers asynchronous device use.
+    // Tensor captures keep storage alive until the queued device launch is submitted.
     auto launch = [workingLogits, workingBitmask, workspace, logitsDesc, maskDesc, workspaceSize, executor,
                    aclStream]() -> int {
         auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);

@@ -159,15 +159,13 @@ std::tuple<at::Tensor, at::Tensor> kv_quant_sparse_attn_sharedkv(
                 "ACLNN workspace exceeds Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, q.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream, {attentionOut, softmaxLse, workspace});
+    const sgl_cann::OpApiContext opApi(stream);
     std::vector<at::Tensor> tensors{q, attentionOut, softmaxLse, workspace};
     for (const auto *tensor :
          {&ori_kv, &cmp_kv, &ori_sparse_indices, &cmp_sparse_indices, &ori_block_table, &cmp_block_table, &cu_seqlens_q,
           &cu_seqlens_ori_kv, &cu_seqlens_cmp_kv, &seqused_q, &seqused_kv, &sinks, &metadata}) {
         if (tensor->has_value()) tensors.push_back(**tensor);
     }
-    for (const auto &tensor : tensors)
-        opApi.record_stream(tensor);
     auto aclStream = stream.stream(false);
     auto launch = [tensors, inputs, outDesc, lseDesc, layoutQString, layoutKvString, workspace, workspaceSize, executor,
                    aclStream]() -> int {

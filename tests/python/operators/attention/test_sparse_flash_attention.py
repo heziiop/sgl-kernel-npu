@@ -59,6 +59,10 @@ def test_sparse_flash_attention_graph_workspace_reuse():
 
     graphs, outputs, reservations = [], [], []
     for calls in (1, 32):
+        # Give each graph the same allocator baseline. A warm eager workspace
+        # may otherwise make only the first graph's reserved delta look small.
+        torch.npu.synchronize()
+        torch.npu.empty_cache()
         before = torch.npu.memory_reserved()
         graph = torch.npu.NPUGraph()
         with torch.npu.graph(graph, stream=stream):

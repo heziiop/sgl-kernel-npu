@@ -40,13 +40,9 @@ at::Tensor add_example(const at::Tensor &x1, const at::Tensor &x2)
                 "ACLNN workspace exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, x1.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream, {y, workspace});
-    opApi.record_stream(x1);
-    opApi.record_stream(x2);
-    opApi.record_stream(y);
-    opApi.record_stream(workspace);
+    const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    // Captures protect the host queue; record_stream protects asynchronous device use.
+    // Tensor captures keep storage alive until the queued device launch is submitted.
     auto launch = [x1, x2, y, workspace, x1Desc, x2Desc, yDesc, workspaceSize, executor, aclStream]() -> int {
         auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "AddExample ACLNN execution failed: ", aclGetRecentErrMsg());

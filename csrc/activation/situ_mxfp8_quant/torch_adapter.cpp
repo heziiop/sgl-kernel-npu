@@ -61,15 +61,10 @@ std::tuple<at::Tensor, at::Tensor> situ_mxfp8_quant(const at::Tensor &x, const a
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, x.options().dtype(at::kByte));
 
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream, {payload, scales, workspace});
-    opApi.record_stream(x);
-    opApi.record_stream(group_list);
-    opApi.record_stream(payload);
-    opApi.record_stream(scales);
-    opApi.record_stream(workspace);
+    const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
 
-    // Captures retain queued host resources; record_stream retains asynchronous device storage.
+    // Tensor captures keep storage alive until the queued device launch is submitted.
     auto launch = [x, group_list, payload, scales, workspace, xDesc, groupDesc, payloadDesc, scalesDesc, workspaceSize,
                    executor, aclStream]() -> int {
         auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);

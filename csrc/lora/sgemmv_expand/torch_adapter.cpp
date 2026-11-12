@@ -72,18 +72,10 @@ at::Tensor sgemmv_expand(at::Tensor x, at::Tensor weight, at::Tensor lora_indice
 
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, y.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream, {workspace});
-    opApi.record_stream(x);
-    opApi.record_stream(weight);
-    opApi.record_stream(lora_indices);
-    opApi.record_stream(seq_len);
-    opApi.record_stream(lora_ranks);
-    opApi.record_stream(slice_offsets);
-    opApi.record_stream(y);
-    opApi.record_stream(workspace);
+    const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
 
-    // Tensor captures cover the host queue; record_stream covers asynchronous device use.
+    // Tensor captures keep storage alive until the queued device launch is submitted.
     auto launch = [x, weight, lora_indices, seq_len, lora_ranks, slice_offsets, y, workspace, xDesc, weightDesc,
                    loraIndicesDesc, seqLenDesc, loraRanksDesc, sliceOffsetsDesc, yDesc, workspaceSize, executor,
                    aclStream]() -> int {

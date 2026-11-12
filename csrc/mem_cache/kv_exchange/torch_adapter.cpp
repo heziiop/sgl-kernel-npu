@@ -212,13 +212,7 @@ void kv_exchange_submit(const at::Tensor &device_indices, const at::Tensor &host
     if (workspaceSize > 0) {
         workspace = at::empty({static_cast<int64_t>(workspaceSize)}, device_indices.options().dtype(at::kByte));
     }
-    const sgl_cann::OpApiContext opApi(stream, {workspace});
-    if (workspace.defined()) opApi.record_stream(workspace);
-    opApi.record_stream(device_indices);
-    opApi.record_stream(host_indices);
-    for (const auto &tensor : device_components) {
-        opApi.record_stream(tensor);
-    }
+    const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
     // Keep the Tensor and ACLNN descriptor owners alive through queued launch.
     auto launch = [device_indices, host_indices, components = device_components.vec(), fields, transfer, deviceDesc,

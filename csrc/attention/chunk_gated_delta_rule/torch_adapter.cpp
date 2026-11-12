@@ -107,16 +107,14 @@ chunk_gated_delta_rule(const at::Tensor &query, const at::Tensor &key, const at:
                 "ACLNN workspace size exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, query.options().dtype(at::kByte));
 
-    // Captures cover the host queue; stream recording covers asynchronous use.
+    // Tensor captures keep storage alive until the queued device launch is submitted.
     std::vector<at::Tensor> tensors{q, k, v, betaTensor, state, lengths, out, finalState, workspace};
     if (hasGamma) tensors.push_back(gamma);
     if (outputChunkState) tensors.push_back(chunk);
     std::vector<std::shared_ptr<aclTensor>> descriptors{qDesc,       kDesc,     vDesc,     betaDesc, stateDesc,
                                                         lengthsDesc, gammaDesc, chunkDesc, outDesc,  finalDesc};
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream, {out, finalState, workspace});
-    for (const auto &tensor : tensors)
-        opApi.record_stream(tensor);
+    const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
     auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
         const auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);

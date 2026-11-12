@@ -72,11 +72,7 @@ at::Tensor update_oe_token_table(const at::Tensor &tokens, const at::Tensor &req
     TORCH_CHECK(status == ACL_SUCCESS, "UpdateOeTokenTable workspace query failed: ", aclGetRecentErrMsg());
     auto workspace = at::empty({static_cast<int64_t>(workspace_size)}, oe_token_table.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
-    const sgl_cann::OpApiContext opApi(stream, {workspace});
-    for (auto &tensor : tensors) {
-        opApi.record_stream(tensor);
-    }
-    opApi.record_stream(workspace);
+    const sgl_cann::OpApiContext opApi(stream);
     auto acl_stream = stream.stream(false);
     auto launch = [tensors, descriptors, workspace, workspace_size, executor, acl_stream]() -> int {
         auto result = execute(workspace_size ? workspace.data_ptr() : nullptr, workspace_size, executor, acl_stream);
