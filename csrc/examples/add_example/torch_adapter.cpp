@@ -42,9 +42,9 @@ at::Tensor add_example(const at::Tensor &x1, const at::Tensor &x2)
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    // Tensor captures keep storage alive until the queued device launch is submitted.
-    auto launch = [x1, x2, y, workspace, x1Desc, x2Desc, yDesc, workspaceSize, executor, aclStream]() -> int {
-        auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [x1Desc, x2Desc, yDesc, workspacePtr, workspaceSize, executor, aclStream]() -> int {
+        auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "AddExample ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

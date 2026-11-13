@@ -215,14 +215,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> sgl_sparse_flash_attention(
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, query_input.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
-    std::vector<at::Tensor> tensors{query_input,   key_input,   value_input, sparse_indices_input,
-                                    attention_out, softmax_max, softmax_sum, workspace};
-    for (const auto *tensor : {&block_table_input, &actual_seq_lengths_query_input, &actual_seq_lengths_kv_input,
-                               &query_rope_input, &key_rope_input}) {
-        if (tensor->has_value()) {
-            tensors.push_back(**tensor);
-        }
-    }
     auto aclStream = stream.stream(false);
 
     std::vector<std::shared_ptr<aclTensor>> descriptors{queryDesc,
@@ -237,9 +229,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> sgl_sparse_flash_attention(
                                                         attentionOutDesc,
                                                         softmaxMaxDesc,
                                                         softmaxSumDesc};
-    auto launch = [tensors, descriptors, layoutQueryString, layoutKvString, workspace, workspaceSize, executor,
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [descriptors, layoutQueryString, layoutKvString, workspacePtr, workspaceSize, executor,
                    aclStream]() -> int {
-        const auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+        const auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "sparse_flash_attention ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

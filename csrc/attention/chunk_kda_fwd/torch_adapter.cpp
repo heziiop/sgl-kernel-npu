@@ -412,18 +412,14 @@ chunk_kda_fwd(const at::Tensor &q, const at::Tensor &k, const at::Tensor &v, con
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, q.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
-    std::array<at::Tensor, 21> tensors{qHead,       kHead,         vHead,           gHead,           betaHead,
-                                       aLogTensor,  dtBiasTensor,  initStateContig, cuSeqlensContig, chunkIndicesContig,
-                                       attnOut,     finalStateOut, gkOut,           aqkOut,          akkOut,
-                                       wOut,        uOut,          qgOut,           kgOut,           vNewOut,
-                                       hOutInternal};
     std::array<std::shared_ptr<aclTensor>, 21> descriptors{desc0,  desc1,  desc2,  desc3,  desc4,  desc5,  desc6,
                                                            desc7,  desc8,  desc9,  desc10, desc11, desc12, desc13,
                                                            desc14, desc15, desc16, desc17, desc18, desc19, desc20};
     auto aclStream = stream.stream(false);
-    auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [descriptors, workspacePtr, workspaceSize, executor, aclStream]() -> int {
         TORCH_CHECK(
-            execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream) == ACL_SUCCESS,
+            execute(workspacePtr, workspaceSize, executor, aclStream) == ACL_SUCCESS,
             "aclnnSglChunkKdaFwd failed: ", aclGetRecentErrMsg());
         return ACL_SUCCESS;
     };

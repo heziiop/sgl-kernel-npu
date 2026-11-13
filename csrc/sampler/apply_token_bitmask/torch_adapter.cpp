@@ -109,10 +109,9 @@ at::Tensor apply_token_bitmask(at::Tensor logits, at::Tensor bitmask, c10::optio
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    // Tensor captures keep storage alive until the queued device launch is submitted.
-    auto launch = [workingLogits, workingBitmask, workspace, logitsDesc, maskDesc, workspaceSize, executor,
-                   aclStream]() -> int {
-        auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [logitsDesc, maskDesc, workspacePtr, workspaceSize, executor, aclStream]() -> int {
+        auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "Bitmask ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

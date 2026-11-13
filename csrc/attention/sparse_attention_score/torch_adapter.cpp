@@ -106,13 +106,13 @@ at::Tensor sparse_attention_score(const at::Tensor &query, const at::Tensor &key
                                  &workspaceSize, &executor);
     TORCH_CHECK(status == ACL_SUCCESS, "sparse_attention_score workspace query failed: ", aclGetRecentErrMsg());
     auto workspace = at::zeros({static_cast<int64_t>(workspaceSize)}, query.options().dtype(at::kByte));
-    inputs.insert(inputs.end(), {out, lse, workspace});
     descriptors.insert(descriptors.end(), {outDesc, lseDesc});
     const auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
     const auto aclStream = stream.stream(false);
-    auto launch = [inputs, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
-        const auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [descriptors, workspacePtr, workspaceSize, executor, aclStream]() -> int {
+        const auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "sparse_attention_score execution failed: ", aclGetRecentErrMsg());
         return result;
     };

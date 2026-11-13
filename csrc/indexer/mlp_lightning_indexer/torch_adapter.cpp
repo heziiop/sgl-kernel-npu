@@ -104,10 +104,10 @@ std::tuple<at::Tensor, at::Tensor> mlp_lightning_indexer(
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    // Retain descriptors, attributes and storage through the asynchronous host queue.
-    auto launch = [tensors, descriptors, queryLayout, keyLayout, workspace, workspaceSize, executor,
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [descriptors, queryLayout, keyLayout, workspacePtr, workspaceSize, executor,
                    aclStream]() -> int {
-        auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+        auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "MlpLightningIndexer ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

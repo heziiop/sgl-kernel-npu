@@ -126,18 +126,14 @@ at::Tensor causal_conv1d(const at::Tensor &x, const at::Tensor &weight, const at
                 "ACLNN workspace size exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, x.options().dtype(at::kByte));
 
-    // Tensor captures keep storage alive until the queued device launch is submitted.
-    std::vector<at::Tensor> tensors{x, weight, conv_states, y, workspace};
-    for (const auto &tensor : {biasTensor, queryTensor, cacheTensor, initialTensor, acceptedTensor}) {
-        if (tensor.defined()) tensors.push_back(tensor);
-    }
     std::vector<std::shared_ptr<aclTensor>> descriptors{xDesc,     weightDesc,  stateDesc,    biasDesc, queryDesc,
                                                         cacheDesc, initialDesc, acceptedDesc, yDesc};
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
-        const auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [descriptors, workspacePtr, workspaceSize, executor, aclStream]() -> int {
+        const auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "CausalConv1d ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

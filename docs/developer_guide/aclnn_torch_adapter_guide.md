@@ -5,20 +5,26 @@ and pass that same stream to the ACLNN execution function. The generated ACLNN
 entry forwards it to `NnopbaseRunWithWorkspace`; choosing ACLNN does not itself
 introduce a different execution stream.
 
-The launch callback must capture the owning Tensors and ACL descriptors by value
-until the device work has been submitted. Keeping only a `data_ptr()` or an
-`aclTensor` descriptor does not retain Tensor storage. In eager execution,
-`RunOpApi` can queue that callback on a host thread; the captured device stream
-still determines where the work executes. After submission, the allocator's
-ordering on the allocation stream protects internal workspace, conversion
-buffers and outputs. These adapters therefore need no `record_stream` calls in
-either eager execution or graph capture.
+In eager execution, `RunOpApi` can queue the launch callback on a host thread.
+That does not introduce a new device stream: device launches and later work on
+the same stream must retain FIFO submission order. The caching allocator can
+reuse released storage on its allocation stream under that ordering, even
+while earlier device work is pending. Internal workspace and conversion
+buffers allocated and used on this stream therefore need neither callback
+Tensor captures nor `record_stream` calls. Retaining those Tensors in queued
+callbacks unnecessarily extends their lifetime and increases peak memory.
+
+The callback captures workspace as a raw pointer and retains ACL descriptors
+and host-side attribute owners needed by the queued execution. These objects
+do not retain Tensor storage. This rule relies on FIFO host submission as well
+as device-stream order; it does not apply to arbitrary host-side access to
+released memory or to storage allocated on another stream.
 
 During capture, `OpApiContext::run` drains prior host submissions for the current
-stream and launches directly. This keeps submission order and releases temporary
-Tensor references on the capture thread, allowing graph-pool reuse. It does not
-wait for device completion. Recording every temporary during capture would defer
-its reuse until capture ends and can make graph memory grow with operator calls.
+stream and launches directly. This preserves order relative to earlier queued
+work. It does not wait for device completion. Tensor storage is not captured by
+the callback. Recording every temporary during capture can defer its reuse until
+capture ends and make graph memory grow with operator calls.
 
 Callers own dependencies and storage lifetimes when passing a Tensor to another
 stream, including caller-provided outputs and mutable state. For example:

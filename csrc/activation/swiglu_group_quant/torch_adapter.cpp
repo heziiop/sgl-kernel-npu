@@ -122,8 +122,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> swiglu_group_quant(
     TORCH_CHECK(bytes <= INT64_MAX, "SwiGLU workspace exceeds tensor allocation limit");
     auto ws = at::empty({static_cast<int64_t>(bytes)}, x.options().dtype(at::kByte));
     const sgl_cann::OpApiContext opApi(stream);
-    auto launch = [ws, bytes, executor, tensors, desc, stream]() -> int {
-        auto result = execute(bytes ? ws.data_ptr() : nullptr, bytes, executor, stream.stream(false));
+    void *workspacePtr = bytes ? ws.data_ptr() : nullptr;
+    auto launch = [workspacePtr, bytes, executor, desc, stream]() -> int {
+        auto result = execute(workspacePtr, bytes, executor, stream.stream(false));
         TORCH_CHECK(result == ACL_SUCCESS, "SwiGLU execution failed: ", aclGetRecentErrMsg());
         return result;
     };

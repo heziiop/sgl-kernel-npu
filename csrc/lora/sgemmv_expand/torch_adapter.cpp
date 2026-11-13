@@ -75,11 +75,10 @@ at::Tensor sgemmv_expand(at::Tensor x, at::Tensor weight, at::Tensor lora_indice
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
 
-    // Tensor captures keep storage alive until the queued device launch is submitted.
-    auto launch = [x, weight, lora_indices, seq_len, lora_ranks, slice_offsets, y, workspace, xDesc, weightDesc,
-                   loraIndicesDesc, seqLenDesc, loraRanksDesc, sliceOffsetsDesc, yDesc, workspaceSize, executor,
-                   aclStream]() -> int {
-        auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [xDesc, weightDesc, loraIndicesDesc, seqLenDesc, loraRanksDesc, sliceOffsetsDesc, yDesc,
+                   workspacePtr, workspaceSize, executor, aclStream]() -> int {
+        auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "sgemmv_expand ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

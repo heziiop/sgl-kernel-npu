@@ -83,11 +83,10 @@ void sgemmc_shrink(at::Tensor x, at::Tensor weight, at::Tensor lora_indices, at:
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
 
-    // Tensor captures keep storage alive until the queued device launch is submitted.
-    auto launch = [x, weight, lora_indices, seq_len, lora_ranks, lora_scales, y, workspace, xDesc, weightDesc,
-                   loraIndicesDesc, seqLenDesc, loraRanksDesc, loraScalesDesc, yDesc, workspaceSize, executor,
-                   aclStream]() -> int {
-        auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [xDesc, weightDesc, loraIndicesDesc, seqLenDesc, loraRanksDesc, loraScalesDesc, yDesc, workspacePtr,
+                   workspaceSize, executor, aclStream]() -> int {
+        auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "sgemmc_shrink ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

@@ -56,13 +56,12 @@ void batch_matmul_transpose(const at::Tensor &a, const at::Tensor &b, at::Tensor
     TORCH_CHECK(workspaceSize <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
                 "ACLNN workspace size exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, a.options().dtype(at::kByte));
-    const std::array<at::Tensor, 3> tensors = {a, b, c};
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    // Tensor captures keep storage alive until the queued device launch is submitted.
-    auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
-        const auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [descriptors, workspacePtr, workspaceSize, executor, aclStream]() -> int {
+        const auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "BatchMatmulTranspose execution failed: ", aclGetRecentErrMsg());
         return result;
     };

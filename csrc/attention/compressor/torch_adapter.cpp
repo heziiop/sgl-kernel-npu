@@ -97,35 +97,12 @@ at::Tensor compressor(const at::Tensor &x, const at::Tensor &wkv, const at::Tens
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    auto launch = [=]() -> int {
-        // Tensor and descriptor captures retain their storage while the host task queues.
-        (void)x;
-        (void)wkv;
-        (void)wgate;
-        (void)state_cache;
-        (void)ape;
-        (void)norm_weight;
-        (void)rope_sin;
-        (void)rope_cos;
-        (void)state_block_table;
-        (void)cu_seqlens;
-        (void)seqused;
-        (void)start_pos;
-        (void)output;
-        (void)xDesc;
-        (void)wkvDesc;
-        (void)wgateDesc;
-        (void)stateDesc;
-        (void)apeDesc;
-        (void)normDesc;
-        (void)sinDesc;
-        (void)cosDesc;
-        (void)tableDesc;
-        (void)cuDesc;
-        (void)usedDesc;
-        (void)posDesc;
-        (void)outDesc;
-        auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    std::vector<std::shared_ptr<aclTensor>> descriptors{xDesc, wkvDesc, wgateDesc, stateDesc, apeDesc, normDesc,
+                                                        sinDesc, cosDesc, tableDesc, cuDesc, usedDesc, posDesc,
+                                                        outDesc};
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [descriptors, workspacePtr, workspaceSize, executor, aclStream]() -> int {
+        auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "compressor ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

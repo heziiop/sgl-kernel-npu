@@ -97,17 +97,14 @@ std::tuple<at::Tensor, at::Tensor> la(const at::Tensor &query, const at::Tensor 
                 "ACLNN workspace size exceeds the Tensor allocation limit");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, q.options().dtype(at::kByte));
 
-    std::vector<at::Tensor> tensors{q, k, v, softmaxLogMaxSum, attentionOut, workspace};
-    if (hasAttenMask) tensors.push_back(attenMask);
-    if (hasAlibiMask) tensors.push_back(alibiMask);
-    if (hasDropMask) tensors.push_back(dropMask);
     std::vector<std::shared_ptr<aclTensor>> descriptors{qDesc,         kDesc,        vDesc,       attenMaskDesc,
                                                         alibiMaskDesc, dropMaskDesc, softmaxDesc, outDesc};
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    auto launch = [tensors, descriptors, input_layout, workspace, workspaceSize, executor, aclStream]() -> int {
-        const auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    auto launch = [descriptors, input_layout, workspacePtr, workspaceSize, executor, aclStream]() -> int {
+        const auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "laser attention ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

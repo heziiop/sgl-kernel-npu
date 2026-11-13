@@ -13,11 +13,10 @@
 
 namespace sgl_cann {
 
-// Keep host submission consistent for ACLNN bridges. The launch callable must
-// retain every Tensor and descriptor until device work has been submitted.
-// Internal allocations and all accesses use the current stream, so allocator
-// stream ordering protects their device lifetime without record_stream.
-// Callers own readiness and lifetime protection for tensors passed across streams.
+// Keep host submission consistent for ACLNN bridges. Each launch uses the
+// current NPU stream; FIFO launch order and stream-local allocator reuse cover
+// internal same-stream storage. Callers own cross-stream dependencies and the
+// lifetime of tensors they pass across streams.
 class OpApiContext {
 public:
     explicit OpApiContext(c10_npu::NPUStream stream)
@@ -29,9 +28,8 @@ public:
     {
         if (capturing_) {
             // stream() submits earlier host-queued work before this direct launch;
-            // it does not wait for device completion. Destroy the callable's
-            // Tensor captures on the capture thread so its graph pool can reuse
-            // temporary storage between successive operators.
+            // it does not wait for device completion. Run inline so graph capture
+            // sees this launch and its descriptor/executor wrappers stay local.
             TORCH_CHECK(stream_.stream() != nullptr, name, ": failed to get capture stream");
             launch();
         } else {

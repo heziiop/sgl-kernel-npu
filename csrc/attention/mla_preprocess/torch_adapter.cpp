@@ -195,13 +195,6 @@ std::tuple<at::Tensor &, at::Tensor &, at::Tensor &, at::Tensor &> sgl_mla_prepr
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, hidden_state.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
-    std::vector<at::Tensor> tensors{
-        hidden_state,  gamma0,      beta0,         wdqkv,         descale0,      gamma1,       beta1,
-        wuq,           descale1,    gamma2,        cos,           sin,           wuk,          kv_cache,
-        kv_cache_rope, slotmapping, quant_scale0,  quant_offset0, bias0,         quant_scale1, quant_offset1,
-        bias1,         q_out0,      kv_cache_out0, q_out1,        kv_cache_out1, workspace};
-    if (hasCtkvScale) tensors.push_back(*ctkv_scale);
-    if (hasQnopeScale) tensors.push_back(*q_nope_scale);
     auto aclStream = stream.stream(false);
 
     std::vector<std::shared_ptr<aclTensor>> descriptors{
@@ -210,8 +203,9 @@ std::tuple<at::Tensor &, at::Tensor &, at::Tensor &, at::Tensor &> sgl_mla_prepr
         wukDesc,    kvCacheDesc,     kvCacheRopeDesc,  slotMappingDesc, quantScale0Desc, quantOffset0Desc,
         bias0Desc,  quantScale1Desc, quantOffset1Desc, bias1Desc,       ctkvScaleDesc,   qnopeScaleDesc,
         qOut0Desc,  kvCacheOut0Desc, qOut1Desc,        kvCacheOut1Desc};
-    auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
-        const auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [descriptors, workspacePtr, workspaceSize, executor, aclStream]() -> int {
+        const auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "mla_preprocess ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

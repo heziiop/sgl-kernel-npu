@@ -214,10 +214,9 @@ void kv_exchange_submit(const at::Tensor &device_indices, const at::Tensor &host
     }
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    // Keep the Tensor and ACLNN descriptor owners alive through queued launch.
-    auto launch = [device_indices, host_indices, components = device_components.vec(), fields, transfer, deviceDesc,
-                   hostDesc, workspace, workspaceSize, executor, aclStream]() -> int {
-        auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [fields, transfer, deviceDesc, hostDesc, workspacePtr, workspaceSize, executor, aclStream]() -> int {
+        auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "KV exchange ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

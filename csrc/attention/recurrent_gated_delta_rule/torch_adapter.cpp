@@ -134,17 +134,15 @@ at::Tensor recurrent_gated_delta_rule(const at::Tensor &mix_qkv, const at::Tenso
     TORCH_CHECK(workspaceSize <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
                 "RGDR workspace too large");
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, mix_qkv.options().dtype(at::kByte));
-    std::vector<at::Tensor> tensors{mix, state, recurrent, betaTensor, lengths, indices, gamma, out, workspace};
-    for (const auto &tensor : {seed, cache, accepted, keyGate})
-        if (tensor.defined()) tensors.push_back(tensor);
     std::vector<std::shared_ptr<aclTensor>> descriptors{mixDesc,     stateDesc,   betaDesc,  lengthsDesc,
                                                         indicesDesc, seedDesc,    cacheDesc, acceptedDesc,
                                                         gammaDesc,   keyGateDesc, outDesc};
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
-        const auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [descriptors, workspacePtr, workspaceSize, executor, aclStream]() -> int {
+        const auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "RGDR ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

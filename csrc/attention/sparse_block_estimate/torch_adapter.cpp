@@ -111,9 +111,10 @@ std::tuple<at::Tensor, at::Tensor> sparse_block_estimate(const at::Tensor &query
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    auto launch = [query, key, mask, count, workspace, qDesc, kDesc, maskDesc, countDesc, qArray, kArray, qLengths,
-                   kLengths, layout, workspaceSize, executor, aclStream]() -> int {
-        auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [qDesc, kDesc, maskDesc, countDesc, qArray, kArray, qLengths,
+                   kLengths, layout, workspacePtr, workspaceSize, executor, aclStream]() -> int {
+        auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "call aclnnSglSparseBlockEstimate failed, detail:", aclGetRecentErrMsg());
         return result;
     };

@@ -74,8 +74,9 @@ at::Tensor update_oe_token_table(const at::Tensor &tokens, const at::Tensor &req
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
     auto acl_stream = stream.stream(false);
-    auto launch = [tensors, descriptors, workspace, workspace_size, executor, acl_stream]() -> int {
-        auto result = execute(workspace_size ? workspace.data_ptr() : nullptr, workspace_size, executor, acl_stream);
+    void *workspacePtr = workspace_size ? workspace.data_ptr() : nullptr;
+    auto launch = [descriptors, workspacePtr, workspace_size, executor, acl_stream]() -> int {
+        auto result = execute(workspacePtr, workspace_size, executor, acl_stream);
         TORCH_CHECK(result == ACL_SUCCESS, "UpdateOeTokenTable ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

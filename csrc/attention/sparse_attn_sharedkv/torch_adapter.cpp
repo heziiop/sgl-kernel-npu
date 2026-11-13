@@ -188,22 +188,16 @@ std::tuple<at::Tensor, at::Tensor> sgl_sparse_attn_sharedkv(
     auto workspace = at::empty({static_cast<int64_t>(workspaceSize)}, q.options().dtype(at::kByte));
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
-    std::vector<at::Tensor> tensors{q, *ori_kv, *sinks, *metadata, attentionOut, softmaxLse, workspace};
-    for (const auto *tensor : {&cmp_kv, &ori_sparse_indices, &cmp_sparse_indices, &ori_block_table, &cmp_block_table,
-                               &cu_seqlens_q, &cu_seqlens_ori_kv, &cu_seqlens_cmp_kv, &seqused_q, &seqused_kv}) {
-        if (IsPresent(*tensor)) {
-            tensors.push_back(**tensor);
-        }
-    }
     auto aclStream = stream.stream(false);
 
     std::vector<std::shared_ptr<aclTensor>> descriptors{
         qDesc,   oriKvDesc,   cmpKvDesc,   oriSparseDesc, cmpSparseDesc, oriBlockDesc, cmpBlockDesc,
         cuQDesc, cuOriKvDesc, cuCmpKvDesc, seqQDesc,      seqKvDesc,     sinksDesc,    metadataDesc};
     std::vector<std::shared_ptr<aclTensor>> outputs{outDesc, lseDesc};
-    auto launch = [tensors, descriptors, outputs, layoutQString, layoutKvString, workspace, workspaceSize, executor,
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [descriptors, outputs, layoutQString, layoutKvString, workspacePtr, workspaceSize, executor,
                    aclStream]() -> int {
-        const auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+        const auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "sparse_attn_sharedkv ACLNN execution failed: ", aclGetRecentErrMsg());
         return result;
     };

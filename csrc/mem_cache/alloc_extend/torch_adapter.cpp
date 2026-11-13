@@ -36,8 +36,9 @@ void alloc_extend(at::Tensor pre_lens, at::Tensor seq_lens, at::Tensor last_loc,
     auto stream = c10_npu::getCurrentNPUStream();
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
-    auto launch = [tensors, descriptors, workspace, workspaceSize, executor, aclStream]() -> int {
-        auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [descriptors, workspacePtr, workspaceSize, executor, aclStream]() -> int {
+        auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "AllocExtend execution failed: ", aclGetRecentErrMsg());
         return result;
     };

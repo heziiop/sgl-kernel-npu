@@ -64,10 +64,10 @@ std::tuple<at::Tensor, at::Tensor> situ_mxfp8_quant(const at::Tensor &x, const a
     const sgl_cann::OpApiContext opApi(stream);
     auto aclStream = stream.stream(false);
 
-    // Tensor captures keep storage alive until the queued device launch is submitted.
-    auto launch = [x, group_list, payload, scales, workspace, xDesc, groupDesc, payloadDesc, scalesDesc, workspaceSize,
-                   executor, aclStream]() -> int {
-        auto result = execute(workspaceSize ? workspace.data_ptr() : nullptr, workspaceSize, executor, aclStream);
+    void *workspacePtr = workspaceSize ? workspace.data_ptr() : nullptr;
+    auto launch = [xDesc, groupDesc, payloadDesc, scalesDesc, workspacePtr, workspaceSize, executor,
+                   aclStream]() -> int {
+        auto result = execute(workspacePtr, workspaceSize, executor, aclStream);
         TORCH_CHECK(result == ACL_SUCCESS, "situ_mxfp8_quant execution failed: ", aclGetRecentErrMsg());
         return result;
     };
