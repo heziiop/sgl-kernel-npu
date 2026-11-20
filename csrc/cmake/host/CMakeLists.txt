@@ -20,6 +20,9 @@ target_include_directories(sgl_host_operators PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../aclnn_torch_adapter"
     "${torch_npu_root}/include" "${ASCEND_CANN_PACKAGE_PATH}/include"
     ${Python3_INCLUDE_DIRS})
+if("scatter_nd_update_hp" IN_LIST host_operators)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../data_move/scatter_nd_update_hp/cann.cmake")
+endif()
 target_link_libraries(sgl_host_operators PRIVATE ${TORCH_LIBRARIES})
 set_target_properties(sgl_host_operators PROPERTIES
     POSITION_INDEPENDENT_CODE ON CXX_EXTENSIONS OFF

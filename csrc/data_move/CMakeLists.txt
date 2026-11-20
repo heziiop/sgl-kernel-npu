@@ -22,3 +22,4 @@ foreach(direction IN ITEMS per_layer_direct_pf_lf all_layer_direct_lf_pf)
         TORCH_ADAPTER torch_adapter.cpp
     )
 endforeach()
+sgl_discover_operators()

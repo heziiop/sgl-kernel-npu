@@ -22,6 +22,7 @@
 | [chunk_kda_fwd](operators/attention/kda/chunk_kda_fwd.md) | `ascendc`, `torch_native` |
 | [chunk_fwd_o](operators/attention/gdn/chunk_o.md) | `triton`, `torch_native` |
 | [transfer_kv_dim_exchange](operators/data_move/transfer_kv_dim_exchange.md) | `aclrt`, `torch_native` |
+| [scatter_nd_update_hp](operators/data_move/scatter_nd_update_hp.md) | `cann_ops_nn`（ARCH22）、`torch_native` |
 | [transfer_mamba_state](operators/data_move/transfer_mamba_state.md) | `aclrt`, `torch_native` |
 | [transfer_kv_all_layer_direct_lf_pf](operators/data_move/transfer_kv_all_layer_direct_lf_pf.md) | `aclrt`, `torch_native` |
 | [transfer_kv_per_layer_direct_pf_lf](operators/data_move/transfer_kv_per_layer_direct_pf_lf.md) | `aclrt`, `torch_native` |

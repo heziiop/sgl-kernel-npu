@@ -40,6 +40,10 @@ ROOT = Path(__file__).resolve().parents[1]
 # Explicit mapping: a new native ID must get a test mapping before this runner
 # can claim full coverage. Registration/architecture/selection come from CMake.
 OPERATORS = {
+    "scatter_nd_update_hp": (
+        "data_move/test_scatter_nd_update_hp.py",
+        "scatter_nd_update_hp",
+    ),
     "apply_token_bitmask": (
         "sampler/test_apply_token_bitmask.py",
         "apply_token_bitmask",
@@ -165,6 +169,8 @@ def test_groups(selected):
     for operator, unit in selected.items():
         path = "tests/python/operators/" + OPERATORS[operator][0]
         backend = {"HOST": "aclrt", "AICPU": "aicpu", "AICORE": "ascendc"}[unit]
+        if operator == "scatter_nd_update_hp":
+            backend = "cann_ops_nn"
         groups[path] = {"file": path, "impl": backend, "required": True, "filter": None}
     path = "tests/python/operators/data_move/test_transfer_state_direct.py"
     if path in groups and not {PER_LAYER, ALL_LAYERS}.issubset(selected):

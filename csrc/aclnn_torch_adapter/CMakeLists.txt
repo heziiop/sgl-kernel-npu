@@ -61,6 +61,10 @@ set_target_properties(sgl_kernel_npu PROPERTIES CXX_EXTENSIONS OFF
 target_include_directories(sgl_kernel_npu PRIVATE ${cann_includes})
 target_link_libraries(sgl_kernel_npu PRIVATE "${TORCH_NPU_LIBRARY}"
     "${ACL_LIBRARY}" ${cann_libraries} ${CMAKE_DL_LIBS})
+if("scatter_nd_update_hp" IN_LIST SGL_HOST_OPERATORS)
+    find_library(SGL_SCATTER_NNOPBASE nnopbase PATHS "${sdk}/lib64" NO_DEFAULT_PATH REQUIRED)
+    target_link_libraries(sgl_kernel_npu PRIVATE "${SGL_SCATTER_NNOPBASE}")
+endif()
 # Dependencies are loaded by torch/torch_npu and the initialized CANN runtime.
 # Do not bake the build machine's absolute directories into the wheel.
 set_target_properties(sgl_kernel_npu PROPERTIES
