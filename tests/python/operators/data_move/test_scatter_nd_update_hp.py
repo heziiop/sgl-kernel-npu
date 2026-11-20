@@ -133,6 +133,45 @@ def test_scatter_nd_update_hp_storage_offsets():
     assert torch.equal(storage.cpu(), expected)
 
 
+@pytest.mark.parametrize("storage_format,rank", [(0, 4), (32, 5)])
+@pytest.mark.parametrize("dtype", [torch.int8, torch.float16])
+def test_scatter_nd_update_hp_base_format_views(storage_format, rank, dtype):
+    import torch_npu
+    from sgl_kernel_npu.operators.data_move import scatter_nd_update_hp
+
+    impl, _ = get_test_impls()
+    require_test_impl(scatter_nd_update_hp, impl)
+    # Match SGLang's layer/page/slot allocation, then select a layer and flatten.
+    shape = (2, 3, 8, 1, 33) if rank == 5 else (2, 3, 8, 33)
+    storage = torch_npu.npu_format_cast(
+        torch.full(shape, 11, dtype=dtype, device="npu"), storage_format
+    )
+    cache = storage[1].view(-1, 1, 33)
+    assert torch_npu.get_npu_format(cache) == storage_format
+    indices = torch.tensor([[1], [7], [23]], device="npu")
+    updates = torch.full((3, 1, 33), -17, dtype=dtype, device="npu")
+    expected = storage.cpu()
+    expected[1].view(-1, 1, 33).index_copy_(0, indices.cpu().flatten(), updates.cpu())
+    pointer = cache.data_ptr()
+    result = scatter_nd_update_hp(cache, indices, updates, impl=impl)
+    assert result.data_ptr() == pointer
+    assert torch_npu.get_npu_format(cache) == storage_format
+    assert torch.equal(storage.cpu(), expected)
+
+
+@pytest.mark.parametrize("argument", ["cache", "updates"])
+def test_scatter_nd_update_hp_rejects_internal_storage(argument):
+    import sgl_kernel_npu  # noqa: F401 -- loads the selected native extension
+    import torch_npu
+
+    cache, indices, updates = generate_data(64, 16, 32, torch.float16, "random", 2)
+    tensors = dict(cache=cache, indices=indices, updates=updates)
+    tensors[argument] = torch_npu.npu_format_cast(tensors[argument], 29)
+    assert torch_npu.get_npu_format(tensors[argument]) == 29
+    with pytest.raises(RuntimeError, match="base storage formats"):
+        torch.ops.npu.scatter_nd_update_hp(**tensors)
+
+
 @pytest.mark.parametrize(
     "invalid,match",
     [

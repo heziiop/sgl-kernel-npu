@@ -82,10 +82,13 @@ at::Tensor &Scatter(at::Tensor &cache, const at::Tensor &indices, const at::Tens
                 "All tensors must be on the same NPU");
     TORCH_CHECK(cache.is_contiguous() && indices.is_contiguous() && updates.is_contiguous(),
                 "Only contiguous tensors are supported");
-    TORCH_CHECK(at_npu::native::get_npu_format(cache) == ACL_FORMAT_ND &&
-                    at_npu::native::get_npu_format(indices) == ACL_FORMAT_ND &&
-                    at_npu::native::get_npu_format(updates) == ACL_FORMAT_ND,
-                "Only ND storage format is supported");
+    for (const auto &tensor : {cache, indices, updates}) {
+        auto format = at_npu::native::get_npu_format(tensor);
+        // Views of 4D/5D KV allocations can retain NCHW/NCDHW storage tags.
+        // These base layouts are linear; contiguous views can be described as ND.
+        TORCH_CHECK(format == ACL_FORMAT_ND || format == ACL_FORMAT_NCHW || format == ACL_FORMAT_NCDHW,
+                    "Only ND/NCHW/NCDHW base storage formats are supported; got format ", format);
+    }
     TORCH_CHECK(cache.scalar_type() == at::kChar || cache.scalar_type() == at::kHalf, "cache must be INT8 or FP16");
     TORCH_CHECK(cache.scalar_type() == updates.scalar_type(), "cache and updates must have the same dtype");
     TORCH_CHECK(indices.scalar_type() == at::kInt || indices.scalar_type() == at::kLong,

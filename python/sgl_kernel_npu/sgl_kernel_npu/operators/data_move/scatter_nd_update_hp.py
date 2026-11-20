@@ -42,11 +42,13 @@ def _torch_native_impl(cache, indices, updates):
 def scatter_nd_update_hp(cache, indices, updates, *, impl="auto"):
     """Write ``updates`` to unique cache rows in place and return ``cache``.
 
-    ``cache`` is contiguous ND INT8 or FP16, shaped [capacity, width] or
+    ``cache`` is contiguous INT8 or FP16, shaped [capacity, width] or
     [capacity, 1, width]. ``indices`` is contiguous INT32/INT64 [tokens, 1];
     each index must be unique and in [0, capacity). ``updates`` has the cache's
     dtype and trailing dimensions, with tokens rows. All tensors must be on
-    the same NPU. Inputs and updates must not overlap cache storage.
+    the same NPU, using ND/NCHW/NCDHW base storage. Contiguous views of 4D/5D
+    allocations may retain their base format tag; blocked formats are rejected.
+    Inputs and updates must not overlap cache storage.
 
     ``auto`` selects ``cann_ops_nn`` on arch22. This requires an installed
     CANN ScatterNdUpdate high_performance implementation; no device kernel is

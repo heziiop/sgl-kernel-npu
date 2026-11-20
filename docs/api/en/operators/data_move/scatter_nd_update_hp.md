@@ -20,8 +20,11 @@ scatter_nd_update_hp(cache, indices, updates, *, impl="auto")
 `C` is cache capacity, `W` is row width and `T` is the number of updates.
 The trailing dimensions of updates must match cache.
 
-All tensors must be contiguous ND tensors on the same NPU. Contiguous views with
-a storage offset are supported. Indices must not overlap cache storage either.
+All tensors must be contiguous on the same NPU, with ND, NCHW or NCDHW base
+storage. Contiguous views of 4D/5D cache allocations may retain NCHW/NCDHW tags;
+these are described as ND without copying or converting the cache. Blocked
+formats such as FRACTAL_NZ are rejected. Contiguous views with a storage offset
+are supported. Indices must not overlap cache storage either.
 Empty updates return cache immediately. Index values are not checked through a
 host synchronization; duplicate and out-of-range indices are outside the contract.
 

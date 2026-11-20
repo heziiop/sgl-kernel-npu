@@ -20,7 +20,9 @@ scatter_nd_update_hp(cache, indices, updates, *, impl="auto")
 `C` 为 cache 容量，`W` 为行宽，`T` 为 updates 数量。
 updates 的后续维度必须与 cache 一致。
 
-三个张量必须在同一 NPU，连续且为 ND 存储格式；支持带 storage offset 的连续 view。
+三个张量必须在同一 NPU，连续且为 ND/NCHW/NCDHW 基础存储格式。
+4D/5D cache 分配后的连续 view 可能保留 NCHW/NCDHW 标记，封装直接按 ND 描述，
+无需拷贝或转换 cache；仍拒绝 FRACTAL_NZ 等内部格式。支持带 storage offset 的连续 view。
 `indices` 也不得与 cache 存储重叠。空 updates 直接返回 cache。
 不通过 Host 同步检查索引值；重复和越界索引不在接口契约内。
 
