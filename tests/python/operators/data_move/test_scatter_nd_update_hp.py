@@ -76,13 +76,14 @@ def test_scatter_nd_update_hp(width, dtype, pattern):
 @pytest.mark.parametrize("rank", [2, 3])
 @pytest.mark.parametrize("index_dtype", [torch.int32, torch.int64])
 @pytest.mark.parametrize("tokens", [0, 1, 17])
-def test_scatter_nd_update_hp_boundaries(rank, index_dtype, tokens):
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=["fp16", "bf16"])
+def test_scatter_nd_update_hp_boundaries(rank, index_dtype, tokens, dtype):
     from sgl_kernel_npu.operators.data_move import scatter_nd_update_hp
 
     impl, _ = get_test_impls()
     require_test_impl(scatter_nd_update_hp, impl)
     cache, indices, updates = generate_data(
-        41, tokens, 33, torch.float16, "random", rank, index_dtype
+        41, tokens, 33, dtype, "random", rank, index_dtype
     )
     expected = cache.cpu()
     expected.index_copy_(0, indices.cpu().reshape(-1).long(), updates.cpu())
@@ -175,7 +176,7 @@ def test_scatter_nd_update_hp_rejects_internal_storage(argument):
 @pytest.mark.parametrize(
     "invalid,match",
     [
-        ("cache_dtype", "INT8 or FP16"),
+        ("cache_dtype", "INT8, FP16 or BF16"),
         ("index_dtype", "INT32 or INT64"),
         ("indices_rank", "indices must have shape"),
         ("updates_shape", "updates must match"),

@@ -13,7 +13,7 @@ scatter_nd_update_hp(cache, indices, updates, *, impl="auto")
 
 | Argument | Shape | dtype | Contract |
 | --- | --- | --- | --- |
-| `cache` | `[C,W]` / `[C,1,W]` | INT8 / FP16 | Modified and returned |
+| `cache` | `[C,W]` / `[C,1,W]` | INT8 / FP16 / BF16 | Modified and returned |
 | `indices` | `[T,1]` | INT32 / INT64 | Unique IDs in `[0,C)` |
 | `updates` | `[T,...]` | Same as cache | No overlap with cache |
 
@@ -67,8 +67,9 @@ Add `--make-clean` when an existing build has a different operator selection.
 The native entry is `torch.ops.npu.scatter_nd_update_hp(cache, indices, updates)`.
 Tests cover 16384 updates into 766080 cache rows: INT8 widths 656/128 and FP16
 width 1, each with contiguous and random row IDs. Full-cache comparisons include
-unwritten rows. Boundary, validation and cross-stream temporary-input tests are
-also included. Enable profiling with `--enable-perf=true`; use `--prof-dir` and
+unwritten rows. Boundary tests cover FP16 and BF16 with INT32 and INT64 indices.
+Input validation and cross-stream temporary inputs are also tested. Enable
+profiling with `--enable-perf=true` and use `--prof-dir` and
 `--csv-path` to select result locations.
 
 CPU-only selection and reference checks:

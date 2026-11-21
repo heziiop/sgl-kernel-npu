@@ -13,7 +13,7 @@ scatter_nd_update_hp(cache, indices, updates, *, impl="auto")
 
 | 参数 | 形状 | dtype | 约束 |
 | --- | --- | --- | --- |
-| `cache` | `[C,W]` / `[C,1,W]` | INT8 / FP16 | 原地修改并返回同一存储 |
+| `cache` | `[C,W]` / `[C,1,W]` | INT8 / FP16 / BF16 | 原地修改并返回同一存储 |
 | `indices` | `[T,1]` | INT32 / INT64 | 行号唯一，且在 `[0,C)` 内 |
 | `updates` | `[T,...]` | 与 cache 相同 | 不得与 cache 存储重叠 |
 
@@ -96,4 +96,5 @@ python -m pytest tests/csrc/test_scatter_nd_update_hp_build.py -q
 
 生产形状测试使用 cache 766080 行、16384 updates，INT8 宽度 656 / 128、FP16 宽度 1。
 精度检查比较完整 cache，包含未写入区域，并验证索引、updates 不被修改。
-另有 INT32 索引、2D、空输入、非对齐宽度，以及跨 stream 临时输入生命周期检查。
+边界测试覆盖 FP16 和 BF16 搭配 INT32、INT64 索引，以及 2D、空输入和非对齐宽度。
+另有跨 stream 临时输入生命周期检查。

@@ -60,6 +60,9 @@ auto Describe(const at::Tensor &tensor)
         case at::kHalf:
             dtype = ACL_FLOAT16;
             break;
+        case at::kBFloat16:
+            dtype = ACL_BF16;
+            break;
         case at::kInt:
             dtype = ACL_INT32;
             break;
@@ -89,8 +92,10 @@ at::Tensor &Scatter(at::Tensor &cache, const at::Tensor &indices, const at::Tens
         TORCH_CHECK(format == ACL_FORMAT_ND || format == ACL_FORMAT_NCHW || format == ACL_FORMAT_NCDHW,
                     "Only ND/NCHW/NCDHW base storage formats are supported; got format ", format);
     }
-    TORCH_CHECK(cache.scalar_type() == at::kChar || cache.scalar_type() == at::kHalf, "cache must be INT8 or FP16");
-    TORCH_CHECK(cache.scalar_type() == updates.scalar_type(), "cache and updates must have the same dtype");
+    const auto cache_dtype = cache.scalar_type();
+    TORCH_CHECK(cache_dtype == at::kChar || cache_dtype == at::kHalf || cache_dtype == at::kBFloat16,
+                "cache must be INT8, FP16 or BF16");
+    TORCH_CHECK(cache_dtype == updates.scalar_type(), "cache and updates must have the same dtype");
     TORCH_CHECK(indices.scalar_type() == at::kInt || indices.scalar_type() == at::kLong,
                 "indices must be INT32 or INT64");
     TORCH_CHECK(cache.dim() == 2 || cache.dim() == 3,
