@@ -1,6 +1,6 @@
 # scatter_nd_update_hp
 
-Write unique KV cache rows in place with CANN's installed ScatterNdUpdate
+Write selected KV cache rows in place with CANN's installed ScatterNdUpdate
 high-performance implementation. This operator uses only the new architecture.
 
 ## Signature
@@ -14,19 +14,21 @@ scatter_nd_update_hp(cache, indices, updates, *, impl="auto")
 | Argument | Shape | dtype | Contract |
 | --- | --- | --- | --- |
 | `cache` | `[C,W]` / `[C,1,W]` | INT8 / FP16 / BF16 | Modified and returned |
-| `indices` | `[T,1]` | INT32 / INT64 | Unique IDs in `[0,C)` |
-| `updates` | `[T,...]` | Same as cache | No overlap with cache |
+| `indices` | `[T,1]` | INT32 / INT64 | Row IDs in `[0,C)` |
+| `updates` | `[T,...]` | Same as cache | Trailing dimensions match cache |
 
 `C` is cache capacity, `W` is row width and `T` is the number of updates.
-The trailing dimensions of updates must match cache.
 
-All tensors must be contiguous on the same NPU, with ND, NCHW or NCDHW base
-storage. Contiguous views of 4D/5D cache allocations may retain NCHW/NCDHW tags;
-these are described as ND without copying or converting the cache. Blocked
-formats such as FRACTAL_NZ are rejected. Contiguous views with a storage offset
-are supported. Indices must not overlap cache storage either.
-Empty updates return cache immediately. Index values are not checked through a
-host synchronization; duplicate and out-of-range indices are outside the contract.
+All tensors must be on the same NPU. The wrapper passes contiguous ND, NCHW
+and NCDHW tensors directly to CANN, including views with a storage offset.
+For other layouts, it uses `torch_npu` to copy into contiguous ND tensors.
+If the cache needs conversion, it copies the result back into the original cache.
+Indices must not overlap cache storage. Empty updates return cache immediately.
+
+The wrapper launches the kernel without checking index values. In the CANN
+high-performance path, updates to the same row may produce a nondeterministic
+result. Out-of-range indices, including `-1`, may cause writes outside the cache,
+corrupting other data or triggering an NPU error.
 
 `auto` selects `cann_ops_nn` on arch22; `torch_native` explicitly selects the
 PyTorch reference. arch35 is unsupported. The installed CANN must provide a

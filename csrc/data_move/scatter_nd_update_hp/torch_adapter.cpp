@@ -78,20 +78,24 @@ auto Describe(const at::Tensor &tensor)
     return std::unique_ptr<aclTensor, decltype(&aclDestroyTensor)>(descriptor, &aclDestroyTensor);
 }
 
+at::Tensor PrepareTensor(const at::Tensor &tensor)
+{
+    // Contiguous views of 4D/5D KV allocations can retain NCHW/NCDHW storage tags.
+    const auto format = at_npu::native::get_npu_format(tensor);
+    if (tensor.is_contiguous() &&
+        (format == ACL_FORMAT_ND || format == ACL_FORMAT_NCHW || format == ACL_FORMAT_NCDHW)) {
+        return tensor;
+    }
+    auto work = at_npu::native::empty_with_format(tensor.sizes(), tensor.options(), ACL_FORMAT_ND);
+    work.copy_(tensor);
+    return work;
+}
+
 at::Tensor &Scatter(at::Tensor &cache, const at::Tensor &indices, const at::Tensor &updates)
 {
     TORCH_CHECK(cache.device().type() == c10::DeviceType::PrivateUse1, "cache must be on NPU");
     TORCH_CHECK(indices.device() == cache.device() && updates.device() == cache.device(),
                 "All tensors must be on the same NPU");
-    TORCH_CHECK(cache.is_contiguous() && indices.is_contiguous() && updates.is_contiguous(),
-                "Only contiguous tensors are supported");
-    for (const auto &tensor : {cache, indices, updates}) {
-        auto format = at_npu::native::get_npu_format(tensor);
-        // Views of 4D/5D KV allocations can retain NCHW/NCDHW storage tags.
-        // These base layouts are linear; contiguous views can be described as ND.
-        TORCH_CHECK(format == ACL_FORMAT_ND || format == ACL_FORMAT_NCHW || format == ACL_FORMAT_NCDHW,
-                    "Only ND/NCHW/NCDHW base storage formats are supported; got format ", format);
-    }
     const auto cache_dtype = cache.scalar_type();
     TORCH_CHECK(cache_dtype == at::kChar || cache_dtype == at::kHalf || cache_dtype == at::kBFloat16,
                 "cache must be INT8, FP16 or BF16");
@@ -111,17 +115,18 @@ at::Tensor &Scatter(at::Tensor &cache, const at::Tensor &indices, const at::Tens
     const c10::DeviceGuard guard(cache.device());
     auto stream = c10_npu::getCurrentNPUStream();
     auto acl_stream = stream.stream(false);
-    // Capture protects storage through host queueing; recordStream also protects
-    // asynchronous device use when inputs were allocated on another stream.
+    // Record the original tensors before any asynchronous copies or kernel launches.
     for (const auto &tensor : {cache, indices, updates}) {
         c10_npu::NPUCachingAllocator::recordStream(tensor.storage().data_ptr(), stream);
     }
-    auto launch = [cache, indices, updates, acl_stream]() -> int {
+    auto cache_work = PrepareTensor(cache);
+    auto launch = [cache_work, indices_work = PrepareTensor(indices), updates_work = PrepareTensor(updates),
+                   acl_stream]() -> int {
         // Descriptors must be destroyed before their pooled host memory is recycled.
         HostMemoryPool pool;
-        auto self = Describe(cache);
-        auto index = Describe(indices);
-        auto update = Describe(updates);
+        auto self = Describe(cache_work);
+        auto index = Describe(indices_work);
+        auto update = Describe(updates_work);
         uint64_t workspace_size = 0;
         aclOpExecutor *executor = nullptr;
         auto status = aclnnSglScatterNdUpdateHpGetWorkspaceSize(self.get(), index.get(), update.get(), &workspace_size,
@@ -137,6 +142,9 @@ at::Tensor &Scatter(at::Tensor &cache, const at::Tensor &indices, const at::Tens
         return status;
     };
     at_npu::native::OpCommand::RunOpApi("aclnnSglScatterNdUpdateHp", launch);
+    if (!cache_work.is_same(cache)) {
+        cache.copy_(cache_work);
+    }
     return cache;
 }
 }  // namespace

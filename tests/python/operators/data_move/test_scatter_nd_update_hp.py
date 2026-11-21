@@ -161,7 +161,7 @@ def test_scatter_nd_update_hp_base_format_views(storage_format, rank, dtype):
 
 
 @pytest.mark.parametrize("argument", ["cache", "updates"])
-def test_scatter_nd_update_hp_rejects_internal_storage(argument):
+def test_scatter_nd_update_hp_internal_storage(argument):
     import sgl_kernel_npu  # noqa: F401 -- loads the selected native extension
     import torch_npu
 
@@ -169,8 +169,39 @@ def test_scatter_nd_update_hp_rejects_internal_storage(argument):
     tensors = dict(cache=cache, indices=indices, updates=updates)
     tensors[argument] = torch_npu.npu_format_cast(tensors[argument], 29)
     assert torch_npu.get_npu_format(tensors[argument]) == 29
-    with pytest.raises(RuntimeError, match="base storage formats"):
-        torch.ops.npu.scatter_nd_update_hp(**tensors)
+    pointer = tensors["cache"].data_ptr()
+    saved_updates = updates.cpu()
+    expected = cache.cpu()
+    expected.index_copy_(0, indices.cpu().flatten(), saved_updates)
+    result = torch.ops.npu.scatter_nd_update_hp(**tensors)
+    assert result.data_ptr() == pointer
+    assert torch_npu.get_npu_format(tensors[argument]) == 29
+    assert torch.equal(tensors["cache"].cpu(), expected)
+    assert torch.equal(tensors["updates"].cpu(), saved_updates)
+
+
+@pytest.mark.parametrize("cache_axis", [0, 1])
+def test_scatter_nd_update_hp_noncontiguous(cache_axis):
+    from sgl_kernel_npu.operators.data_move import scatter_nd_update_hp
+
+    impl, _ = get_test_impls()
+    require_test_impl(scatter_nd_update_hp, impl)
+    storage = torch.full((18, 12), 11, dtype=torch.float16, device="npu")
+    cache_slice = (slice(1, None, 2), slice(None))
+    if cache_axis == 1:
+        cache_slice = (slice(None), slice(1, None, 2))
+    cache = storage[cache_slice]
+    indices = torch.tensor([[1, 0], [4, 0], [8, 0]], device="npu")[:, :1]
+    updates = torch.arange(6 * cache.size(1), device="cpu").reshape(3, -1)
+    updates = updates.to(torch.float16).npu()[:, ::2]
+    assert all(not tensor.is_contiguous() for tensor in (cache, indices, updates))
+
+    # Compare the backing tensor so gaps in the destination view are checked too.
+    expected = storage.cpu()
+    expected[cache_slice].index_copy_(0, indices.cpu().flatten(), updates.cpu())
+    result = scatter_nd_update_hp(cache, indices, updates, impl=impl)
+    assert result.data_ptr() == cache.data_ptr()
+    assert torch.equal(storage.cpu(), expected)
 
 
 @pytest.mark.parametrize(
@@ -180,7 +211,6 @@ def test_scatter_nd_update_hp_rejects_internal_storage(argument):
         ("index_dtype", "INT32 or INT64"),
         ("indices_rank", "indices must have shape"),
         ("updates_shape", "updates must match"),
-        ("noncontiguous", "contiguous"),
         ("cpu_indices", "same NPU"),
     ],
 )
@@ -197,8 +227,6 @@ def test_scatter_nd_update_hp_rejects_invalid_inputs(invalid, match):
         indices = indices.flatten()
     elif invalid == "updates_shape":
         updates = updates[..., :-1].contiguous()
-    elif invalid == "noncontiguous":
-        updates = updates[..., ::2]
     elif invalid == "cpu_indices":
         indices = indices.cpu()
     with pytest.raises(RuntimeError, match=match):

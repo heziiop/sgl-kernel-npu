@@ -1,4 +1,4 @@
-"""Reference for unique, valid row writes; preserves the destination alias."""
+"""Reference for in-place cache row writes."""
 
 
 def scatter_nd_update_hp(cache, indices, updates):

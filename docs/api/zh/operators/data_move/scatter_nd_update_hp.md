@@ -14,17 +14,19 @@ scatter_nd_update_hp(cache, indices, updates, *, impl="auto")
 | 参数 | 形状 | dtype | 约束 |
 | --- | --- | --- | --- |
 | `cache` | `[C,W]` / `[C,1,W]` | INT8 / FP16 / BF16 | 原地修改并返回同一存储 |
-| `indices` | `[T,1]` | INT32 / INT64 | 行号唯一，且在 `[0,C)` 内 |
-| `updates` | `[T,...]` | 与 cache 相同 | 不得与 cache 存储重叠 |
+| `indices` | `[T,1]` | INT32 / INT64 | 行号在 `[0,C)` 内 |
+| `updates` | `[T,...]` | 与 cache 相同 | 后续维度与 cache 一致 |
 
 `C` 为 cache 容量，`W` 为行宽，`T` 为 updates 数量。
-updates 的后续维度必须与 cache 一致。
 
-三个张量必须在同一 NPU，连续且为 ND/NCHW/NCDHW 基础存储格式。
-4D/5D cache 分配后的连续 view 可能保留 NCHW/NCDHW 标记，封装直接按 ND 描述，
-无需拷贝或转换 cache；仍拒绝 FRACTAL_NZ 等内部格式。支持带 storage offset 的连续 view。
-`indices` 也不得与 cache 存储重叠。空 updates 直接返回 cache。
-不通过 Host 同步检查索引值；重复和越界索引不在接口契约内。
+三个张量必须在同一 NPU。连续的 ND、NCHW 和 NCDHW 张量直接传给 CANN，
+包含带 storage offset 的连续 view。其他布局通过 `torch_npu` 拷贝到连续的 ND 张量。
+如果 cache 需要转换，算子会将结果写回原 cache。
+`indices` 不得与 cache 存储重叠。空 updates 直接返回 cache。
+
+封装在启动 kernel 前不检查索引值。CANN 高性能路径中，多个 update 写入同一行时，
+最终写入结果可能不确定。
+越界索引（包括 `-1`）可能导致写入 cache 范围之外，破坏其他数据或触发 NPU 错误。
 
 `auto` 在 arch22 上选择 `cann_ops_nn`，`torch_native` 是显式选择的 PyTorch 参考实现。
 arch35 不注册此算子。需要目标 CANN 为对应芯片、dtype 和索引类型提供

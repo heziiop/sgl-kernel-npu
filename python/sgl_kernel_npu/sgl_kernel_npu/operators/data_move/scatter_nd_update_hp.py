@@ -40,21 +40,25 @@ def _torch_native_impl(cache, indices, updates):
 
 @register_operator("data_move.scatter_nd_update_hp")
 def scatter_nd_update_hp(cache, indices, updates, *, impl="auto"):
-    """Write ``updates`` to unique cache rows in place and return ``cache``.
+    """Write ``updates`` to selected cache rows in place and return ``cache``.
 
-    ``cache`` is contiguous INT8, FP16 or BF16, shaped [capacity, width] or
-    [capacity, 1, width]. ``indices`` is contiguous INT32/INT64 [tokens, 1];
-    each index must be unique and in [0, capacity). ``updates`` has the cache's
-    dtype and trailing dimensions, with tokens rows. All tensors must be on
-    the same NPU, using ND/NCHW/NCDHW base storage. Contiguous views of 4D/5D
-    allocations may retain their base format tag; blocked formats are rejected.
-    Inputs and updates must not overlap cache storage.
+    ``cache`` is INT8, FP16 or BF16, shaped [capacity, width] or
+    [capacity, 1, width]. ``indices`` is INT32/INT64 [tokens, 1]
+    with row IDs in [0, capacity). ``updates`` has the cache's dtype and
+    trailing dimensions, with tokens rows. All tensors must be on the same
+    NPU. The CANN backend prepares contiguous ND tensors when a layout needs
+    conversion and copies the result back into ``cache`` if needed.
+    ``indices`` must not overlap cache storage.
 
     ``auto`` selects ``cann_ops_nn`` on arch22. This requires an installed
     CANN ScatterNdUpdate high_performance implementation; no device kernel is
     bundled and no fallback backend is selected. ``torch_native`` is an
-    explicit reference implementation. Duplicate/out-of-range indices are
-    outside the contract and are not checked by synchronizing to the host.
+    explicit reference implementation.
+
+    The wrapper launches the kernel without checking index values. In the CANN
+    high-performance path, updates to the same row may produce a nondeterministic
+    result. Out-of-range indices, including -1, may cause writes outside the
+    cache, corrupting other data or triggering an NPU error.
     """
     return get_impl_by_name("data_move.scatter_nd_update_hp", impl)(
         cache, indices, updates
